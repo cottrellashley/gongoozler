@@ -14,14 +14,16 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gongoozler ./cmd/g
 FROM python:3.13-slim
 COPY --from=ghcr.io/astral-sh/uv:0.12.10 /uv /uvx /usr/local/bin/
 COPY --from=cli /out/gongoozler /usr/local/bin/gongoozler
-# A run file names "gongoozler" among its dependencies; in a box it resolves to this wheel.
 ENV UV_CACHE_DIR=/opt/uv-cache \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never \
-    UV_FIND_LINKS=/opt/gongoozler/wheels \
     GONGOOZLER_STATE=/state
+# The library as a wheel, built with a cache of its own: the box user's cache stays the box user's.
 COPY python /tmp/gongoozler-python
-RUN uv build --wheel /tmp/gongoozler-python -o /opt/gongoozler/wheels && rm -rf /tmp/gongoozler-python
+RUN UV_CACHE_DIR=/tmp/uv-build-cache uv build --wheel /tmp/gongoozler-python -o /opt/gongoozler/wheels \
+    && rm -rf /tmp/gongoozler-python /tmp/uv-build-cache
+# A run file names "gongoozler" among its dependencies; in a box it resolves to this wheel.
+ENV UV_FIND_LINKS=/opt/gongoozler/wheels
 COPY docker/warm.py /opt/gongoozler/warm.py
 RUN useradd --create-home --uid 1000 box && mkdir -p /job /state /opt/uv-cache && chown box /job /state /opt/uv-cache
 USER box

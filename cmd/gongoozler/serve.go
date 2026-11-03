@@ -107,6 +107,9 @@ func workerCmd(args []string, stdout, stderr io.Writer) int {
 		*work = filepath.Join(state, "worker")
 	}
 	var l worker.Launcher
+	if !*docker {
+		placeSelf(*cgroup)
+	}
 	if *docker {
 		l = &worker.Docker{Image: *image, Network: *network}
 	} else {

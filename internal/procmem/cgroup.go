@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -141,19 +142,57 @@ func SelfContained(proc string) (Cgroup, bool) {
 }
 
 var (
-	scopeOnce sync.Once
-	scopeOK   bool
+	makeOnce, scopeOnce sync.Once
+	makeOK, scopeOK     bool
 )
 
-// ScopesAvailable reports whether `systemd-run --user --scope` works here, trying it once.
-func ScopesAvailable() bool {
-	scopeOnce.Do(func() {
+// ScopesCanBeMade reports whether `systemd-run --user --scope` works here: the user's systemd
+// manager is reachable. Tried once.
+func ScopesCanBeMade() bool {
+	makeOnce.Do(func() {
 		path, err := exec.LookPath("systemd-run")
 		if err != nil {
 			return
 		}
-		cmd := exec.Command(path, "--user", "--scope", "--quiet", "--collect", "--", "true")
-		scopeOK = cmd.Run() == nil
+		makeOK = exec.Command(path, "--user", "--scope", "--quiet", "--collect", "--", "true").Run() == nil
 	})
+	return makeOK
+}
+
+// ScopesAvailable reports whether this process can give a run a scope of its own: a scope can be
+// made, and a child started in it (CLONE_INTO_CGROUP), as a run is. The second needs this process
+// inside the user's systemd tree. The kernel lets a process start a child in another cgroup only
+// if it may write the common ancestor of the two, so a process in a login session's scope or a
+// system service (a shell over SSH, or in WSL; a CI runner) can make scopes but not start runs in
+// them (kb/systemd.md). Tried once, the way a run's scope is made.
+func ScopesAvailable() bool {
+	scopeOnce.Do(func() { scopeOK = ScopesCanBeMade() && childInScope() })
 	return scopeOK
+}
+
+func childInScope() bool {
+	runtime.LockOSThread() // the anchor's parent-death signal follows the thread that starts it
+	defer runtime.UnlockOSThread()
+	unit := fmt.Sprintf("gongoozler-probe-%d-%d", os.Getpid(), time.Now().UnixNano())
+	anchor := exec.Command("systemd-run", "--user", "--scope", "--quiet", "--collect", "--unit", unit, "--", "sleep", "60")
+	anchor.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
+	if anchor.Start() != nil {
+		return false
+	}
+	defer func() {
+		_ = syscall.Kill(-anchor.Process.Pid, syscall.SIGKILL)
+		_ = anchor.Wait() // killed: its error says so
+	}()
+	cg, err := WaitForScope("/proc", anchor.Process.Pid, unit+".scope", 3*time.Second)
+	if err != nil {
+		return false
+	}
+	fd, err := syscall.Open(cg.Path, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return false
+	}
+	defer syscall.Close(fd)
+	child := exec.Command("true")
+	child.SysProcAttr = &syscall.SysProcAttr{UseCgroupFD: true, CgroupFD: fd}
+	return child.Run() == nil
 }

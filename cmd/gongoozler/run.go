@@ -190,6 +190,9 @@ func runCmd(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
+	if !ro.remote {
+		placeSelf(ro.cgroup) // first, so nothing below is said twice
+	}
 	if *paramsJSON != "" {
 		var all map[string]any
 		d := json.NewDecoder(strings.NewReader(*paramsJSON))

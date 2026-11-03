@@ -315,7 +315,7 @@ func (d *Docker) follow(ctx context.Context, cid string, emit func(events.Event)
 			if i < 0 {
 				break
 			}
-			if e, err := events.Decode(stdout[:i]); err == nil {
+			if e := stored(stdout[:i]); e != nil {
 				if n, ok := e.Int("n"); ok {
 					last = n
 				}
@@ -325,6 +325,22 @@ func (d *Docker) follow(ctx context.Context, cid string, emit func(events.Event)
 		}
 	})
 	return last, stderr.String(), err
+}
+
+// stored reads one event as the box's supervisor stored and printed it: numbered `n`. Its own
+// events (run.start, output, artifact, run.end) carry no producer's `seq`, so this is not the
+// producer's envelope check (events.Decode), only that it is an object with a kind and a number.
+func stored(line []byte) events.Event {
+	d := json.NewDecoder(bytes.NewReader(line))
+	d.UseNumber()
+	var e events.Event
+	if d.Decode(&e) != nil || e == nil || e.Kind() == "" {
+		return nil
+	}
+	if _, ok := e.Int("n"); !ok {
+		return nil
+	}
+	return e
 }
 
 // demux reads the Engine API's multiplexed stream: frames of an 8-byte header (the stream, then

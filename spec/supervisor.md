@@ -34,6 +34,17 @@ Where systemd's user manager is reachable, each run gets a transient scope,
 - the run is started inside the scope with `CLONE_INTO_CGROUP` (`SysProcAttr.UseCgroupFD`). If
   the kernel will not (an older kernel), the run starts without one.
 
+**Where the CLI starts matters.** The kernel lets a process start a child in another cgroup only
+if it may write the two cgroups' common ancestor. A CLI started in the user's systemd tree (a
+desktop's terminal) may. One started in a login session's scope or in a system service (a shell
+over SSH or in WSL, a CI runner) may not, though it can still make scopes. So such a CLI first
+places itself: it executes itself again through `systemd-run --user --scope`, which moves it into
+the user's tree, keeping its PID, terminal, output and signals. Its runs then get cgroups
+(`TestARunGetsACgroupWhereverTheCLIIsStarted`). Whether this process can give a run a scope is
+probed once, the way a run's scope is made: a scope, and a child started in it. A program that
+runs the supervisor as a library (`supervise.Run`) gets cgroups only when it is in the user's tree
+itself.
+
 In a container, the container is the cgroup: the supervisor reads its own cgroup's files, which
 the container's limits govern. With neither (macOS, a WSL distribution without systemd, or
 `--cgroup off`), memory is summed PSS. `--cgroup require` refuses to run without a cgroup.

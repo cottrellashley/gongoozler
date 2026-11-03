@@ -10,8 +10,10 @@ the CLI's Linux code runs unchanged. What matters:
   it, as on any Linux.
 - **A cgroup needs systemd.** A run gets a cgroup of its own (exact memory, limits, the dead man's
   switch) only where systemd's user manager runs: WSL distributions can enable systemd
-  (`[boot] systemd=true` in `/etc/wsl.conf`). Without it the supervisor falls back to PSS and the
-  parent-death signal (spec/supervisor.md), and says so (`memory_source: "pss"`).
+  (`[boot] systemd=true` in `/etc/wsl.conf`). A WSL shell sits in a login session's scope, so the
+  CLI places itself in the user's tree first (spec/supervisor.md, "The cgroup"). Without systemd
+  the supervisor falls back to PSS and the parent-death signal, and says so
+  (`memory_source: "pss"`).
 - **Rings live in memory.** A run's rings go in `/dev/shm`, a tmpfs in WSL2 as on Linux, or else
   the run's directory under `~/.local/state`: never on a Windows drive (`/mnt/c/...`), where shared
   mappings are unreliable and slow.

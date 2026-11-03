@@ -361,8 +361,11 @@ func jobFor(dir string) api.Job {
 }
 
 func TestADockerBoxRunsTheSupervisorInsideAndItsEventsComeOut(t *testing.T) {
-	f := &fakeDocker{hold: make(chan struct{}), out: eventLines(
-		numbered("run.start", 1, map[string]any{"id": "x"}), numbered("hello", 2, nil), numbered("run.end", 3, map[string]any{"status": "ok"})),
+	// As the box's supervisor prints them: its own events (run.start, run.end) have no producer's
+	// seq; the run's (hello) do.
+	start, end := events.New("run.start", map[string]any{"id": "x"}), events.New("run.end", map[string]any{"status": "ok"})
+	start["n"], end["n"] = 1, 3
+	f := &fakeDocker{hold: make(chan struct{}), out: eventLines(start, numbered("hello", 2, nil), end),
 		state: map[string]string{
 			"20261103T120000Z-0000beef/meta.json":            `{"id": "20261103T120000Z-0000beef", "status": "ok", "exit_code": 0, "wall": 1.5}`,
 			"20261103T120000Z-0000beef/artifacts/stats.json": `{"x": 2}`,

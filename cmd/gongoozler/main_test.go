@@ -654,3 +654,20 @@ func TestAFileDeclaringMoreMemoryThanThisMachineHasGoesToTheServer(t *testing.T)
 		t.Fatalf("placement local: exit %d:\n%s", code, stderr)
 	}
 }
+
+// Wherever the CLI is started (a terminal in the user's systemd tree, or a login session, a
+// service or a CI runner outside it), a run gets a cgroup of its own where systemd can make one.
+func TestARunGetsACgroupWhereverTheCLIIsStarted(t *testing.T) {
+	if !procmem.ScopesCanBeMade() {
+		t.Skip("systemd user scopes cannot be made here")
+	}
+	state := t.TempDir()
+	file := write(t, "idea.py", "print('in a cgroup')\n")
+	_, stderr, code := gz(t, state, nil, "run", "--plain", "--cgroup", "require", "--launcher", "python3", file)
+	if code != 0 {
+		t.Fatalf("exit %d:\n%s", code, stderr)
+	}
+	if all := lsJSON(t, state); len(all) != 1 || all[0].MemorySource != "cgroup" {
+		t.Fatalf("listed %+v, want memory from its cgroup", all)
+	}
+}

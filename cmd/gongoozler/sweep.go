@@ -55,6 +55,9 @@ func sweepCmd(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
+	if !ro.remote {
+		placeSelf(ro.cgroup) // first, so nothing below is said twice
+	}
 	p, err := ro.prepare(fs.Arg(0), stderr)
 	if err != nil {
 		return failf(stderr, 2, "%v", err)

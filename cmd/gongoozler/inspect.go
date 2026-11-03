@@ -581,6 +581,9 @@ func rerunCmd(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return failf(stderr, 2, "%v", err)
 	}
+	if a.Placement != "remote" {
+		placeSelf("auto") // first, so nothing below is said twice
+	}
 	if a.Status == "running" || a.Status == "queued" {
 		return failf(stderr, 2, "run %s has not ended", a.ID)
 	}

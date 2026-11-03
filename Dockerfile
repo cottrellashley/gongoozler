@@ -1,0 +1,31 @@
+# A box: the gongoozler CLI, uv, Python 3.13, the gongoozler library as a wheel, and a warm
+# package cache with Nautilus in it. A worker runs each job in a container of this image
+# (`gongoozler worker --docker`); the server and the workers can run in it too (tools/e2e-docker.sh).
+#
+#   docker build -t gongoozler .
+
+FROM golang:1.25 AS cli
+WORKDIR /src
+COPY go.mod ./
+COPY cmd cmd
+COPY internal internal
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gongoozler ./cmd/gongoozler
+
+FROM python:3.13-slim
+COPY --from=ghcr.io/astral-sh/uv:0.12.10 /uv /uvx /usr/local/bin/
+COPY --from=cli /out/gongoozler /usr/local/bin/gongoozler
+# A run file names "gongoozler" among its dependencies; in a box it resolves to this wheel.
+ENV UV_CACHE_DIR=/opt/uv-cache \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_FIND_LINKS=/opt/gongoozler/wheels \
+    GONGOOZLER_STATE=/state
+COPY python /tmp/gongoozler-python
+RUN uv build --wheel /tmp/gongoozler-python -o /opt/gongoozler/wheels && rm -rf /tmp/gongoozler-python
+COPY docker/warm.py /opt/gongoozler/warm.py
+RUN useradd --create-home --uid 1000 box && mkdir -p /job /state /opt/uv-cache && chown box /job /state /opt/uv-cache
+USER box
+# Nautilus and gongoozler into uv's cache, so a run that needs them starts without downloading.
+RUN uv run --script /opt/gongoozler/warm.py
+WORKDIR /job
+ENTRYPOINT ["gongoozler"]

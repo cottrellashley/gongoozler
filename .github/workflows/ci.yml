@@ -1,0 +1,40 @@
+# CI runs what `make check` runs, then the fuzzers briefly and the budgets (make bench). GitHub
+# Actions reads only YAML; nothing else in the project is configured in it.
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      UV_PYTHON: "3.13"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.10"
+      - run: uv python install 3.13
+      - name: make check (gofmt, ruff format, go vet, golangci-lint, ruff, mypy, go test -race, pytest)
+        run: make check
+      - name: make fuzz
+        run: make fuzz FUZZTIME=20s
+      - name: make bench (the budgets)
+        run: make bench
+
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+      - run: make build
+      - name: make e2e-docker (a server, a worker, and a run in a box)
+        run: make e2e-docker

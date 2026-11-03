@@ -1,0 +1,23 @@
+# golangci-lint's standard linters (errcheck, govet, ineffassign, staticcheck, unused), with the
+# errors this code ignores on purpose named, and why.
+version = "2"
+
+[linters]
+default = "standard"
+
+[linters.settings.errcheck]
+exclude-functions = [
+    # Status lines to a terminal, a log or an HTTP client: a write that fails has no remedy.
+    "fmt.Fprint", "fmt.Fprintf", "fmt.Fprintln", "io.WriteString",
+    "(*bufio.Writer).Flush", "(*bufio.Writer).Write", "(*text/tabwriter.Writer).Flush", "(*bytes.Buffer).Write", "(*bytes.Buffer).WriteByte", "(*bytes.Buffer).WriteString",
+    "(net/http.ResponseWriter).Write", "(*encoding/json.Encoder).Encode",
+    # Closing what was only read, and closing a response body once read.
+    "(io.Closer).Close", "(*os.File).Close", "(io.ReadCloser).Close",
+    # Cleaning up, at best: what is left is cleaned on the next pass, or is in a temporary directory.
+    "os.Remove", "os.RemoveAll",
+    # Signalling or releasing processes, mappings and descriptors that may already be gone.
+    "syscall.Kill", "syscall.Munmap", "syscall.Close", "syscall.Wait4", "syscall.RawSyscall",
+    "(*os.Process).Signal", "(*os.Process).Kill", "(*os/exec.Cmd).Wait",
+    # crypto/rand.Read never fails (Go 1.24).
+    "crypto/rand.Read",
+]

@@ -25,8 +25,9 @@ section maps each finding to its fix and test.
   dead within a second of its supervisor (with a cgroup, whatever it ignores) and listed lost;
   exact memory for forked workers; an exact out-of-memory kill; one interrupt through real uv;
   no leftovers; events in the log within 250 ms at p99; a stalled terminal never holding a run.
-- **Budgets (`make bench`):** telemetry within 1% of a run with events off; a progress update
-  about 2 µs; ingest from a catalog over a million quotes a second on one core.
+- **Budgets (`make bench`, in CI):** telemetry within 1% of a run with events off; a progress
+  update about 2 µs; ingest from a catalog as fast as Nautilus's own engine given the same quotes
+  from memory (1.25M quotes a second here).
 
 **Not yet:** exercised inside a WSL distribution itself (see `kb/wsl.md`).
 

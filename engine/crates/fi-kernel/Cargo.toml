@@ -1,0 +1,13 @@
+[package]
+name = "fi-kernel"
+description = "The core: series, entities, models, graphs, contracts, unit records, the ledger. No Nautilus, Polars or Python."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+rayon = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

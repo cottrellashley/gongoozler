@@ -60,14 +60,22 @@ output, the kept series and statistics, Nautilus's tearsheet.
 - a viewer joining late sees everything;
 - a slow viewer slows no run.
 
-## 4. fi-engine
+## 4. The fixed income engine: built
 
-**Build:**
-- progress written by fi-engine's Rust loops (ledger steps, sweep variants, worlds) into slots of
-  the same ring (spec/ring.md), while the run holds no Python lock;
-- `gongoozler.fi`.
+**Built:** the engine in `engine/`, reviewed against its platform brief and built out to it
+([../review/2026-11-03-engine.md](../review/2026-11-03-engine.md)); its Rust loops (unit records,
+ledger steps, sweeps) writing their own ring (`fi-ring`, spec/ring.md) while the run holds no
+Python lock; `gongoozler.fi`, keeping an engine run's results; `gongoozler[fi]`; the engine wheel
+in the box image; the engine's examples and `examples/fi_*.py` as run files; one `make check`.
 
-**Evidence:** fi-engine's example E1 as a run file, with progress, at no measurable cost.
+**Evidence:**
+- an engine file under the real supervisor: the engine's stages and progress read from its ring,
+  telemetry complete from two producers, a rerun reproducing six results byte for byte, and `diff`
+  naming what changed (`TestAnEngineRunShowsItsProgressAndItsResultsCompare`);
+- the engine's ring read back by the independent reader, and the same results byte for byte from
+  two processes (`python/tests/test_fi.py`);
+- an engine run in a box, its results back (`tools/e2e-docker.sh`, in CI);
+- the engine's budgets at the spec's full scale, in CI (`make bench-full`).
 
 ## 5. Scale
 

@@ -30,7 +30,7 @@ first 20), and goes on. `FuzzDecode` holds the decoder to any bytes.
 
 | Kind | Fields | Delivery |
 | --- | --- | --- |
-| `hello` | `lib` (the library's version), `pid`, `ppid`, `python`, `script`, `argc`; `argv` only with `GONGOOZLER_ARGV=1` (arguments may hold secrets) | First, from each process |
+| `hello` | `lib` (the library's version), `pid`, `ppid`, `python`, `script`, `argc`; `argv` only with `GONGOOZLER_ARGV=1` (arguments may hold secrets). Another writer in the process names itself: `producer` (`"fi-engine"`) and its version | First, from each ring |
 | `stage` | `name`, `phase` (`begin` or `end`), `depth`; at the end also `elapsed` (seconds), `ok`, and `error` if it failed | Ordered |
 | `progress` | `key`, `done`; optionally `total`, `unit` (`ns`, `items`, …), `sim` (simulated time, nanoseconds since the epoch), `rate` (units a second), `eta` (seconds) | The latest value per `key` (a slot) |
 | `progress.unit` | `key`, `unit` | Ordered, once per change; readers merge it into `progress` |
@@ -61,7 +61,8 @@ Every cut is counted, and `run.end` reports it.
   after its end ([ring.md](ring.md), "Order").
 - **Nothing is lost silently.** Every drop, cut or refusal is counted, and reported in `run.end`.
 - **Forks and threads report safely.** A forked child makes its own ring, and its own `hello`;
-  threads share their process's emitter under its lock.
+  threads share their process's emitter under its lock. A second writer in one process (the
+  engine's Rust code) makes a ring of its own too: each ring is a producer, with its own `seq`.
 
 ## Where events go
 

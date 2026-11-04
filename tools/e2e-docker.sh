@@ -38,4 +38,12 @@ for f in manifest.json orders.jsonl stats.json series.jsonl; do
     test -s "$state/runs/$id/artifacts/$f" || { echo "e2e: no $f from the box"; exit 1; }
 done
 echo "e2e: run $id ran in a box and its results came back"
+# The fixed income engine, resolved from the image's wheels: its results come back too.
+./bin/gongoozler run --remote --plain --no-lock examples/fi_in_a_box.py
+id=$(./bin/gongoozler ls --json | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | tail -1)
+for f in manifest.json ledger.jsonl stats.json; do
+    test -s "$state/runs/$id/artifacts/$f" || { echo "e2e: no $f from the engine's box"; exit 1; }
+done
+grep -q '"fi-engine"' "$state/runs/$id/artifacts/manifest.json" || { echo "e2e: the engine's manifest does not name it"; exit 1; }
+echo "e2e: engine run $id ran in a box and its results came back"
 docker logs "$net-worker" 2>&1 | tail -5

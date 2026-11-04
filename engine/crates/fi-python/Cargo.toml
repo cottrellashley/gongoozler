@@ -1,0 +1,32 @@
+[package]
+name = "fi-python"
+description = "Python bindings: Arrow PyCapsule in and out, a workspace, models (built in or Python), research runs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+name = "fi_engine"
+crate-type = ["cdylib"]
+test = false
+doctest = false
+
+[dependencies]
+fi-kernel = { workspace = true }
+fi-std = { workspace = true }
+fi-terms = { workspace = true }
+fi-ring = { workspace = true }
+fi-research = { workspace = true }
+fi-io = { workspace = true }
+fi-exec = { workspace = true }
+fi-metrics = { workspace = true }
+polars = { workspace = true }
+polars-arrow = { workspace = true }
+pyo3 = { workspace = true }
+pyo3-arrow = { workspace = true }
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
+arrow-data = { workspace = true }
+arrow-cast = { workspace = true }
+numpy = { workspace = true }

@@ -1,6 +1,6 @@
 # Results: what a run keeps
 
-This page is normative. `python/src/gongoozler/results.py` and `nautilus.py` write results;
+This page is normative. `python/src/gongoozler/results.py`, `nautilus.py` and `fi.py` write results;
 `gongoozler diff` and `gongoozler rerun` compare them. Their tests are
 `python/tests/test_results.py`, `test_catalog.py`, and the CLI's
 `TestARerunReproducesItsResultsAndDiffShowsWhatChanged`.
@@ -50,6 +50,24 @@ between identical runs are left out: Nautilus's random event IDs (`init_id`, `ev
 **A failed run keeps what it had.** If the feed breaks the contract or the strategy raises, the
 engine is still ended, the results so far are kept, the manifest says `"complete": false`, and the
 error is raised (`test_a_run_that_fails_keeps_what_it_had_and_says_it_is_incomplete`).
+
+## What the engine's driver keeps
+
+`gongoozler.fi.run` and `sweep` run the fixed income engine (`fi_engine`, `gongoozler[fi]`) and keep,
+unless asked not to (`keep_results=False`), each prefixed by the book's name in a sweep:
+
+| File | What |
+| --- | --- |
+| `ledger.jsonl` | The accounts at each time: NAV, cash, income, price, principal, other, financing, costs, currency, capital, unsettled, overdue, NAV per unit, turnover, holdings |
+| `orders.jsonl` | Every order's life (with the book's `journal`) |
+| `journal.jsonl` | Every transfer with its cause (with the book's `journal`) |
+| `holdings.json` | The final holdings and cash |
+| `stats.json` | The run (final NAV, trades, guards, failure, the identity's largest error, the output's version), its performance, and its order statistics |
+| `manifest.json` | What produced it: the parameters and packages, and the engine's own manifest (series versions and provenance, the knowledge policy, models, the calendar, the book's settings and step order, the mode, approximations, the fingerprint) |
+
+Times are integer nanoseconds and dates ISO strings, so the same run writes the same bytes in any
+process (`test_an_engine_run_keeps_its_results_and_the_same_run_writes_the_same_bytes`), and a
+rerun reproduces them (`TestAnEngineRunShowsItsProgressAndItsResultsCompare`).
 
 ## The series: simulated time, not wall time
 

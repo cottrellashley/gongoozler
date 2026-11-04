@@ -1,0 +1,3 @@
+/target/
+/.venv/
+python/fi_engine/_native*.so

@@ -1,0 +1,13 @@
+[package]
+name = "fi-bench"
+description = "Speed tests against the spec's budgets, on a synthetic universe."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+fi-kernel = { workspace = true }
+fi-std = { workspace = true }
+fi-research = { workspace = true }
+rayon = { workspace = true }

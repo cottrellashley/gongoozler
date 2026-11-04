@@ -1,7 +1,7 @@
 [project]
 name = "gongoozler"
 version = "0.1.0"
-description = "Run a backtest file here or in a box, and watch it run: progress events, feed streams, and a Nautilus driver."
+description = "Run a backtest file here or in a box, and watch it run: progress events, feed streams, a Nautilus driver, and a fixed income engine."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -10,13 +10,18 @@ dependencies = []
 
 [project.optional-dependencies]
 nautilus = ["nautilus_trader>=2.0.0rc8; python_version >= '3.13'"]
+fi = ["fi-engine>=0.1"]
 
 [dependency-groups]
 dev = [
     "pytest>=8",
     "nautilus_trader==2.0.0rc8; python_version >= '3.13'",
     "numpy>=2",
+    "fi-engine",
 ]
+
+[tool.uv.sources]
+fi-engine = { path = "../engine", editable = true }
 
 [build-system]
 requires = ["uv_build>=0.12,<0.13"]
@@ -50,5 +55,5 @@ strict = true
 warn_unreachable = true
 
 [[tool.mypy.overrides]]
-module = ["nautilus_trader.*", "numpy.*"]
+module = ["nautilus_trader.*", "numpy.*", "fi_engine.*", "polars.*"]
 ignore_missing_imports = true

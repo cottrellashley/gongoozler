@@ -121,5 +121,18 @@ an abandoned record is counted in the ring's header, and `run.end` reports the t
 
 ## The same ring from Rust
 
-The format is language-neutral by design: fi-engine's Rust loops (slice 4) are to write progress
-into slots of the same ring directly, while the run holds no Python lock.
+The format is language-neutral by design. The fixed income engine (`engine/`) writes it from Rust
+(`engine/crates/fi-ring`, byte for byte this page), so its loops report while the run holds no
+Python lock:
+- **A ring has one writer.** On import under a supervisor, the engine makes a ring of its own in
+  `GONGOOZLER_RING`, beside the Python emitter's, and says `hello` with `producer: "fi-engine"`.
+  The supervisor reads every ring in the directory, so it is a producer like a forked child's.
+- **What it writes:** a stage for each long loop, `fi.records` (unit records, in `contracts`),
+  `fi.ledger` (a book's steps, with `sim` the simulated time reached) and `fi.sweep` (`books`),
+  with progress in between. A worker thread's update skips rather than wait for the ring, at most
+  twenty a second per loop; the last update of a loop always lands.
+- **A forked child does not write its parent's ring.** The engine's ring is closed at exit, so the
+  run ends with no unclean producer.
+
+Tests: the Rust writer's own (`fi-ring`), `python/tests/test_fi.py` (read back by `ringread.py`)
+and the CLI's `TestAnEngineRunShowsItsProgressAndItsResultsCompare` (read by the supervisor).

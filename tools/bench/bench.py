@@ -37,26 +37,32 @@ SEC = 1_000_000_000
 BASE = 1_546_383_600 * SEC
 
 
-def telemetry(n: int, runs: int) -> dict[str, float]:
+def telemetry(n: int, runs: int) -> dict[str, Any]:
+    """The supervised run as a real one runs: in its cgroup where one can be made (the CLI places
+    itself), so its memory is read from the cgroup's counters rather than by polling PSS."""
     cli = ROOT / "bin" / "gongoozler"
     if not cli.exists():
         sys.exit("bench: build the CLI first (make build)")
     env = {**os.environ, "PYTHONPATH": str(ROOT / "python" / "src")}
-    off, on = [], []
+    off, on, sources = [], [], set()
     with tempfile.TemporaryDirectory(prefix="gz-bench-") as tmp:
         state = Path(tmp) / "state"
         for i in range(runs):
             out = Path(tmp) / f"t{i}"
             subprocess.run([sys.executable, str(CHILD), str(out) + ".off", str(n)], env={**env, "GONGOOZLER_EVENTS": "off"}, check=True)
             off.append(float(Path(str(out) + ".off").read_text()))
-            subprocess.run(
-                [str(cli), "run", "--json", "--no-lock", "--cgroup", "off", "--launcher", sys.executable, str(CHILD), str(out) + ".on", str(n)],
+            res = subprocess.run(
+                [str(cli), "run", "--json", "--no-lock", "--launcher", sys.executable, str(CHILD), str(out) + ".on", str(n)],
                 env={**env, "GONGOOZLER_STATE": str(state)},
                 check=True,
-                stdout=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
             )
             on.append(float(Path(str(out) + ".on").read_text()))
-    return {"off": min(off), "on": min(on), "overhead": min(on) / min(off) - 1}
+            for line in res.stdout.splitlines():
+                if '"run.end"' in line:
+                    sources.add(json.loads(line).get("memory_source", "?"))
+    return {"off": min(off), "on": min(on), "overhead": min(on) / min(off) - 1, "memory_source": ",".join(sorted(sources))}
 
 
 def emit_costs(count: int = 200_000) -> dict[str, float]:
@@ -173,7 +179,9 @@ def main() -> int:
     ap.add_argument("--quick", action="store_true", help="smaller runs, for a smoke test")
     ap.add_argument("--json", action="store_true", help="print the measurements as JSON")
     a = ap.parse_args()
-    n, runs, cat = (100_000, 3, 300_000) if a.quick else (300_000, 7, 1_000_000)
+    # A million quotes, about a second simulated: the supervisor's fixed costs (its ring, its first
+    # poll) are a cost of starting, not of running, and a third of a second exaggerated them.
+    n, runs, cat = (100_000, 3, 300_000) if a.quick else (1_000_000, 5, 1_000_000)
     r = {"emit": emit_costs(), "telemetry": telemetry(n, runs), "catalog": catalog_ingest(cat)}
     if a.json:
         print(json.dumps(r, indent=2))
@@ -185,7 +193,7 @@ def main() -> int:
         failed += not ok
         print(f"{name:22} {fmt(v):>18} {op + ' ' + fmt(limit):>18}  {'ok' if ok else 'MISSED'}")
     t, c = r["telemetry"], r["catalog"]
-    print(f"(telemetry: {t['off']:.3f}s with events off, {t['on']:.3f}s supervised)")
+    print(f"(telemetry: {t['off']:.3f}s with events off, {t['on']:.3f}s supervised; memory by {t['memory_source']})")
     print(
         f"(ingest: {c['ingest'] / 1e6:.2f}M quotes/s from a catalog, {c['reference'] / 1e6:.2f}M from memory into Nautilus's engine; "
         f"EmaCross over a catalog {c['ema_cross'] / 1e6:.2f}M)"

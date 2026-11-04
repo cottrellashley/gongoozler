@@ -1,0 +1,11 @@
+[package]
+name = "fi-ring"
+description = "The watcher's ring (gongoozler spec/ring.md) from Rust: events and progress into shared memory, never waiting."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+memmap2 = "0.9"
+crc32fast = "1.5"

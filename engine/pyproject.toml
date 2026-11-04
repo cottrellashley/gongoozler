@@ -1,0 +1,26 @@
+[build-system]
+requires = ["maturin>=1.16,<2"]
+build-backend = "maturin"
+
+[project]
+name = "fi-engine"
+description = "A generic backtesting engine for fixed income: a Rust core configured from Python, fed by any Arrow frame."
+requires-python = ">=3.11"
+dynamic = ["version"]
+dependencies = ["polars>=1.20", "numpy>=2"]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pandas>=2.2", "pyarrow>=16"]
+
+[tool.maturin]
+manifest-path = "crates/fi-python/Cargo.toml"
+python-source = "python"
+module-name = "fi_engine._native"
+
+[tool.pytest.ini_options]
+testpaths = ["python/tests"]
+
+[tool.uv]
+# A path source is rebuilt only when its cache keys change: these include the Rust, so an edit
+# to the engine rebuilds it in every environment that installs it (kb/uv.md).
+cache-keys = [{ file = "pyproject.toml" }, { file = "Cargo.toml" }, { file = "Cargo.lock" }, { file = "crates/**/*.rs" }, { file = "crates/**/Cargo.toml" }]

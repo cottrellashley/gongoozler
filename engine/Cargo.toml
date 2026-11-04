@@ -1,0 +1,61 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+# fi-python is a Python extension (pyo3 `extension-module`): build it with maturin, not `cargo test`.
+default-members = [
+    "crates/fi-kernel",
+    "crates/fi-terms",
+    "crates/fi-ring",
+    "crates/fi-std",
+    "crates/fi-research",
+    "crates/fi-io",
+    "crates/fi-exec",
+    "crates/fi-metrics",
+    "crates/fi-bench",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99.1"
+publish = false
+
+[workspace.dependencies]
+fi-kernel = { path = "crates/fi-kernel" }
+fi-terms = { path = "crates/fi-terms" }
+fi-ring = { path = "crates/fi-ring" }
+fi-std = { path = "crates/fi-std" }
+fi-research = { path = "crates/fi-research" }
+fi-io = { path = "crates/fi-io" }
+fi-exec = { path = "crates/fi-exec" }
+fi-metrics = { path = "crates/fi-metrics" }
+
+rayon = "1.12"
+libm = "0.2"
+proptest = "1"
+
+# Polars, as a library: ingestion, validation and output frames (crates/fi-io).
+polars = { version = "0.55.2", default-features = false, features = ["dtype-date", "dtype-datetime"] }
+polars-arrow = "0.55.2"
+
+# Nautilus, as libraries (no fork, no Python): the order book for fills, and performance statistics.
+nautilus-core = "0.67.0"
+nautilus-model = "0.67.0"
+nautilus-analysis = "0.67.0"
+
+# Python bindings: Arrow PyCapsule in and out (crates/fi-python).
+pyo3 = { version = "0.30", features = ["extension-module", "abi3-py311"] }
+pyo3-arrow = "0.20"
+arrow-array = { version = "59", features = ["ffi"] }
+arrow-schema = { version = "59", features = ["ffi"] }
+arrow-data = { version = "59", features = ["ffi"] }
+arrow-cast = "59"
+numpy = "0.30"
+
+[profile.release]
+debug = false
+codegen-units = 16
+
+[profile.dev]
+debug = 0
+opt-level = 1

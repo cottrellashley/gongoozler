@@ -1,0 +1,12 @@
+[package]
+name = "fi-exec"
+description = "Execution on Nautilus's crates as libraries: order-book fills (nautilus-model) and RFQ fills."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+fi-kernel = { workspace = true }
+nautilus-core = { workspace = true }
+nautilus-model = { workspace = true }

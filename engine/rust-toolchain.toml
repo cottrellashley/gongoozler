@@ -1,0 +1,4 @@
+[toolchain]
+# Nautilus's minimum supported Rust version.
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]

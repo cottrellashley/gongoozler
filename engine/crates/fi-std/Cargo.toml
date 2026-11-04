@@ -1,0 +1,16 @@
+[package]
+name = "fi-std"
+description = "Standard definitions on the kernel: simple contracts, example models (fair-value curve, Merton, risk parity), synthetic data."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+fi-kernel = { workspace = true }
+fi-terms = { workspace = true }
+rayon = { workspace = true }
+libm = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

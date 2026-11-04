@@ -8,7 +8,7 @@ on:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 75
     env:
       UV_PYTHON: "3.13"
     steps:
@@ -20,16 +20,22 @@ jobs:
         with:
           version: "0.12.10"
       - run: uv python install 3.13
-      - name: make check (gofmt, ruff format, go vet, golangci-lint, ruff, mypy, go test -race, pytest)
+      # The runner's rustup installs the engine's pinned toolchain (engine/rust-toolchain.toml).
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
+      - name: make check (gofmt, ruff format, go vet, golangci-lint, ruff, mypy, the engine's rustfmt, clippy and tests, go test -race, pytest)
         run: make check
       - name: make fuzz
         run: make fuzz FUZZTIME=20s
       - name: make bench (the budgets)
         run: make bench
+      - name: make bench-full (the engine's budgets at the spec's scale, about 3.5 GB)
+        run: make bench-full
 
   image:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6

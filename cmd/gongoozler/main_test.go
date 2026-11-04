@@ -671,3 +671,73 @@ func TestARunGetsACgroupWhereverTheCLIIsStarted(t *testing.T) {
 		t.Fatalf("listed %+v, want memory from its cgroup", all)
 	}
 }
+
+// ----------------------------------------------------------------------------- the engine
+
+// The interpreter of python/.venv, which `uv sync` builds with the engine in it; the test skips
+// without it.
+func enginePython(t *testing.T) string {
+	t.Helper()
+	py := filepath.Join(repo(), "python", ".venv", "bin", "python")
+	if err := exec.Command(py, "-c", "import fi_engine").Run(); err != nil {
+		t.Skip("the engine is not built here: cd python && uv sync")
+	}
+	return py
+}
+
+const engineFile = `import fi_engine as fi
+import gongoozler as gz
+import gongoozler.fi as gzfi
+p = gz.params(top=10)
+ws = fi.Workspace()
+u = ws.synthetic(bonds=150, days=800, seed=3)
+rec = ws.records(u["bonds"], u["calendar"])
+gzfi.run(ws, fi.Strategy(fi.Decision.top_n("marks.signal", p.top), fill=fi.Fill.research(2.0), name="top"), rec)
+`
+
+// Review H6: an engine run shows its progress from Rust (the engine's own ring), ends with its
+// telemetry complete, keeps results a rerun reproduces, and two runs diff by what changed.
+func TestAnEngineRunShowsItsProgressAndItsResultsCompare(t *testing.T) {
+	py := enginePython(t)
+	state := t.TempDir()
+	file := write(t, "engine.py", engineFile)
+	env := []string{pythonPath()}
+	out, stderr, code := gz(t, state, env, "run", "--json", "--launcher", py, file)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	var engine, ledger, stages bool
+	var end map[string]any
+	for _, e := range decodeLines(t, out) {
+		switch e["kind"] {
+		case "hello":
+			engine = engine || e["producer"] == "fi-engine"
+		case "stage":
+			stages = stages || e["name"] == "fi.records"
+		case "progress":
+			ledger = ledger || (e["key"] == "fi.ledger" && e["done"] == e["total"] && e["unit"] == "steps")
+		case "run.end":
+			end = e
+		}
+	}
+	if !engine || !stages || !ledger {
+		t.Fatalf("the engine's ring was not read (hello %v, stages %v, ledger progress %v):\n%s", engine, stages, ledger, out)
+	}
+	tel, _ := end["telemetry"].(map[string]any)
+	if end["status"] != "ok" || tel["complete"] != true || tel["producers"] != float64(2) || tel["unclean_exits"] != float64(0) {
+		t.Fatalf("run.end %v", end)
+	}
+	first := lsJSON(t, state)[0].ID
+	out, stderr, code = gz(t, state, env, "rerun", "--plain", "--launcher", py, first)
+	if code != 0 || !strings.Contains(out, "reproduced: 6 results byte for byte") {
+		t.Fatalf("rerun: %d\n%s\n%s", code, out, stderr)
+	}
+	if _, stderr, code := gz(t, state, env, "run", "--plain", "--launcher", py, "--param", "top=20", file); code != 0 {
+		t.Fatal(stderr)
+	}
+	all := lsJSON(t, state)
+	out, _, code = gz(t, state, nil, "diff", first, all[len(all)-1].ID)
+	if code != 1 || !strings.Contains(out, "param top: (unset) → 20") || !strings.Contains(out, "ledger.jsonl: line 2") {
+		t.Fatalf("diff: exit %d\n%s", code, out)
+	}
+}

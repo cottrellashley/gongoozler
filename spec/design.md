@@ -105,8 +105,8 @@ it:
   about 1,000 timer events per run stays within noise. Measured by `make bench`: within 1%.
 - **Simulated time is not wall time.** Progress and the kept series are in simulated time; the
   series lies on an exact simulated-time grid, the same however the data was batched.
-- **fi-engine progress** will come from its Rust loops writing slots of the same ring while the run
-  holds no Python lock: a core change in fi-engine, in slice 4.
+- **The engine's progress** comes from its Rust loops, writing a ring of their own while the run
+  holds no Python lock (spec/ring.md, "The same ring from Rust").
 
 ## Data
 

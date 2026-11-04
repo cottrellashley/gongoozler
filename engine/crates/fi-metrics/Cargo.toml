@@ -1,0 +1,12 @@
+[package]
+name = "fi-metrics"
+description = "Performance statistics from Nautilus's analysis crate, over ledger outputs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+fi-kernel = { workspace = true }
+nautilus-core = { workspace = true }
+nautilus-analysis = { workspace = true }

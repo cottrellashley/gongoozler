@@ -1,6 +1,7 @@
 # gongoozler. `make check` is what CI runs: formatting, lints, type checks, and every test, Go's
-# under the race detector. `make bench` holds the budgets (tools/bench/bench.py). `make fuzz` fuzzes
-# what reads bytes a run wrote.
+# under the race detector, and the engine's own (engine/Makefile). `make bench` holds the budgets
+# (tools/bench/bench.py, and the engine's at full scale). `make fuzz` fuzzes what reads bytes a run
+# wrote.
 
 GO_TEST_FLAGS ?= -race
 FUZZTIME      ?= 30s
@@ -10,9 +11,18 @@ MYPY          ?= mypy@1.18.2
 GOLANGCI      ?= go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
 IMAGE         ?= gongoozler
 
-.PHONY: check fmt vet lint test-go test-py build fuzz bench docker e2e-docker clean
+.PHONY: check fmt vet lint py-env engine test-go test-py build fuzz bench bench-full docker e2e-docker clean
 
-check: fmt vet lint test-go test-py
+check: fmt vet lint engine py-env test-go test-py
+
+# The engine: rustfmt, clippy, its Rust tests and its Python tests (engine/Makefile).
+engine:
+	$(MAKE) -C engine check
+
+# The Python environment the tests run in, with the engine built into it (the CLI's engine tests
+# use its interpreter).
+py-env:
+	cd python && $(UV) sync --quiet
 
 fmt:
 	@test -z "$$(gofmt -l .)" || { gofmt -l .; echo "gofmt: the files above need formatting"; exit 1; }
@@ -41,8 +51,13 @@ fuzz:
 	go test ./internal/ring -run '^$$' -fuzz '^FuzzOpen$$' -fuzztime $(FUZZTIME) -fuzzminimizetime 5s
 	go test ./internal/header -run '^$$' -fuzz '^FuzzParse$$' -fuzztime $(FUZZTIME) -fuzzminimizetime 5s
 
-bench: build
+bench: build py-env
 	cd python && $(UV) run --quiet python ../tools/bench/bench.py
+	$(MAKE) -C engine bench
+
+# The engine's budgets at the spec's own scale, 9,000 bonds × 2,520 days: about 3.5 GB (CI runs it).
+bench-full:
+	$(MAKE) -C engine bench-full
 
 # A box image: the CLI, uv and Python, with a warm package cache (Dockerfile).
 docker:

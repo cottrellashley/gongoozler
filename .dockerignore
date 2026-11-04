@@ -4,3 +4,6 @@ python/.pytest_cache/
 **/__pycache__/
 **/gongoozler-out/
 review/
+engine/target/
+engine/.venv/
+engine/python/fi_engine/_native*.so

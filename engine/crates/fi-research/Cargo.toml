@@ -1,0 +1,16 @@
+[package]
+name = "fi-research"
+description = "The research driver: strategies, runs and parallel sweeps over shared unit records."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+fi-kernel = { workspace = true }
+rayon = { workspace = true }
+
+[dev-dependencies]
+fi-exec = { workspace = true }
+fi-std = { workspace = true }
+proptest = { workspace = true }

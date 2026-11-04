@@ -130,3 +130,19 @@ The scripts are in `review/repro`; each finding is a test now (the review's reso
 | H6, a catalog (`e12_catalog.py`) | 1.05 s a run from objects that took 1.01 s to build; 0.97 s from the catalog | `run_node` keeps the same results as `run`, every file |
 
 The CLI's own fixed cost on a one-line file: 15 ms, or 32 ms with a cgroup scope.
+
+## The engine at the spec's scale (review M8)
+
+`make bench-full`, first run on GitHub's runner (4 threads; budgets × 1.05 for its cores, × 4.21
+where parallel, by `fi_research::machine`), 4 Nov 2026, at 9,000 bonds × 2,520 days (22.7 M cells):
+
+| Test | Seconds | Budget here | Note |
+| --- | ---: | ---: | --- |
+| Unit records: marks, accrued and flows | 1.134 | 8.418 | 20 M records/s; inside the spec's 2 s for 16 cores |
+| Z-score by sector, through the graph | 0.367 | 8.418 | 2.0× a hand-written loop; same outputs |
+| EWMA volatility, through the graph | 0.525 | 8.418 | 3.5× a hand-written loop |
+| One research run: top 300, monthly, 116 rebalances | 0.047 | 0.053 | 64,448 trades; inside the spec's 50 ms; identity error 8e-15 |
+| Sweep: 64 variants in parallel | 0.967 | 1.266 | 2.6× serial on 4 threads; same accounts |
+
+The same run's telemetry budget: +0.24% (0.856 s with events off, 0.858 s supervised, by cgroup),
+after the supervisor began polling quiet rings half as often.

@@ -291,6 +291,10 @@ scale, 9,000 bonds × 2,520 days (about 3.5 GB of memory; CI runs it). Rust, at 
 
 The research run's budget is not scaled: its cost depends on holdings and days, not the universe.
 
+At the spec's full scale, 9,000 × 2,520, on GitHub's 4-thread runner (CI, 4 Nov): unit records in
+1.13 s and one research run in 47 ms, both inside the spec's budgets for 16 cores, and a sweep 2.6×
+serial (`kb/measurements.md` at the repo's root).
+
 ## Status
 
 What is not built, and stands as a finding in the review until it is: see its resolution section.

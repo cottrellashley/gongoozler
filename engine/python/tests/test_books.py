@@ -257,3 +257,31 @@ def test_a_declared_step_order_moves_events_that_share_a_time_and_both_orders_re
         fi.Strategy(invest_cash, order=["execution", "decisions", *late[3:], "weight_resets"])
     with pytest.raises(fi.InvalidError, match="no phase"):
         fi.Strategy(invest_cash, order=["lunch"])
+
+
+def test_m3_cash_in_each_currency_earns_its_own_rate_in_its_own_day_count():
+    """Review M3: EUR cash earns €STR on ACT/365F, USD cash SOFR on ACT/360, each credited (so
+    compounded) every step; with no rate for EUR, EUR cash earns nothing, as the book then says."""
+    ws, rec, dates = world(days=30, flat_b=True)
+    ws.series("estr", pl.DataFrame({"date": dates, "rate": [3.0] * 30}), time="date", values={"rate": "%"})
+
+    @fi.decision
+    def into_eur_and_out(ctx):
+        return {"B": 0.5} if ctx.k == 0 else ({"B": 0.0} if ctx.k == 5 else None)
+
+    def run(deposit):
+        return ws.run(fi.Strategy(into_eur_and_out, schedule="all", execution_lag=0, deposit_rate=deposit, **USD), rec)
+
+    flat = run({"USD": "sofr.rate"})
+    both = run({"USD": "sofr.rate", "EUR": ("estr.rate", "ACT/365F")})
+    eur0 = flat.final_cash["EUR"]
+    growth = np.prod([1 + 0.03 * (b - a).days / 365 for a, b in zip(dates[5:-1], dates[6:], strict=True)])
+    assert eur0 > 0 and both.final_cash["EUR"] == pytest.approx(eur0 * growth, rel=1e-12)
+    usd0 = run(None).final_cash["USD"]
+    assert flat.final_cash["USD"] > usd0, "USD cash earned SOFR"
+    assert all(r.max_identity_error < 1e-9 for r in (flat, both))
+    with pytest.raises(fi.InvalidError, match="coupon periods"):
+        ws.run(fi.Strategy(into_eur_and_out, deposit_rate={"EUR": ("estr.rate", "ACT/ACT ICMA")}, **USD), rec)
+    with pytest.raises(fi.InvalidError, match="no contract of the book"):
+        ws.currency("JPY")
+        ws.run(fi.Strategy(into_eur_and_out, deposit_rate={"JPY": "estr.rate"}, **USD), rec)

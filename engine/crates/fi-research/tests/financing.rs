@@ -74,6 +74,7 @@ fn secured(
     Agreement {
         name: name.into(),
         kind: AgreementKind::Secured {
+            day_count: fi_kernel::DayCount::Act360,
             collateral,
             basis,
             concentration,
@@ -337,6 +338,7 @@ fn margin_call(times: &[Ts], cut: Ts, receipt: Ts, outstanding: f64) -> LedgerOu
     let repo = Agreement {
         name: "repo".into(),
         kind: AgreementKind::Secured {
+            day_count: fi_kernel::DayCount::Act360,
             collateral: vec![(ids[0], Advance::Fixed(0.92))],
             basis: Basis::Market,
             concentration: None,
@@ -397,6 +399,7 @@ fn capacity_rounds_as_the_agreement_says() {
     let repo = |rounding| Agreement {
         name: "repo".into(),
         kind: AgreementKind::Secured {
+            day_count: fi_kernel::DayCount::Act360,
             collateral: vec![(ids[0], Advance::Fixed(0.9))],
             basis: Basis::Market,
             concentration: None,

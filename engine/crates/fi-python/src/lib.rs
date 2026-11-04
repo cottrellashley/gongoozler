@@ -1460,15 +1460,17 @@ impl PyWorkspace {
         Ok(PyContracts { inner: vec![in_currency(Arc::new(TotalReturn { entity: e, series: series.into(), column: column.into() }), ccy)] })
     }
 
-    /// A cash account, accruing `rate` (`series.column`, a market-wide rate, Act/360) if given.
-    #[pyo3(signature = (name = "cash", rate = None))]
-    fn cash_account(&mut self, name: &str, rate: Option<&str>) -> PyResult<PyContracts> {
+    /// A cash account, accruing `rate` (`series.column`, a market-wide rate) in `day_count` if
+    /// given.
+    #[pyo3(signature = (name = "cash", rate = None, *, day_count = "ACT/360"))]
+    fn cash_account(&mut self, name: &str, rate: Option<&str>, day_count: &str) -> PyResult<PyContracts> {
+        let day_count: fi_kernel::DayCount = day_count.parse().map_err(|e: fi_terms::Error| PyValueError::new_err(e.to_string()))?;
         let rate = rate.map(split).transpose()?.map(|(s, c)| (s.to_owned(), c.to_owned()));
         if let Some((s, c)) = &rate {
             self.ws.series(s).and_then(|x| x.column(c)).map_err(to_py)?;
         }
         let entity = self.ws.entities.intern("cash", name);
-        Ok(PyContracts { inner: vec![Arc::new(CashAccount { entity, rate })] })
+        Ok(PyContracts { inner: vec![Arc::new(CashAccount { entity, rate, day_count })] })
     }
 
     /// A future, marked to market daily: one unit gains `multiplier` × the price change, paid as

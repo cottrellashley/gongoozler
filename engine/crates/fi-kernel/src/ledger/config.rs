@@ -5,6 +5,8 @@ use std::any::Any;
 use std::fmt;
 use std::sync::Arc;
 
+use fi_terms::DayCount;
+
 use super::order::StepOrder;
 use crate::{
     Error, Result, cash::Rounding, entity::EntityId, hash::Hash64, measure::Measure, policy::HoldingPolicy, records::UnitRecords, time::Ts, view::View,
@@ -537,8 +539,10 @@ pub enum AgreementKind {
         concentration: Option<f64>,
         /// The committed amount: the largest balance.
         limit: f64,
-        /// Interest on the balance: a market-wide rate (series, column), Act/360.
+        /// Interest on the balance: a market-wide rate (series, column).
         rate: Option<(String, String)>,
+        /// How that interest accrues.
+        day_count: DayCount,
         /// When the balance must be repaid.
         maturity: Option<Ts>,
         /// Steps a margin call may stay unpaid.
@@ -568,6 +572,19 @@ pub enum AgreementKind {
         /// Steps between margin calls.
         every: usize,
     },
+}
+
+/// Interest on positive cash in one currency (review M3): a market-wide rate (a fraction a year),
+/// read as of each interval's start, accrued in its day count and credited each step, so it
+/// compounds at the calendar's frequency.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CashRate {
+    /// The currency (`EntityId::NONE`: the base).
+    pub currency: EntityId,
+    /// The rate: (series, column).
+    pub rate: (String, String),
+    /// How it accrues.
+    pub day_count: DayCount,
 }
 
 /// A financing agreement between the book and a counterparty (spec, change 5): its terms here,
@@ -627,8 +644,10 @@ pub struct LedgerConfig {
     pub conversion: FxConversion,
     /// How the book may use cash.
     pub cash: CashPolicy,
-    /// A market-wide rate earned on positive base-currency cash (Act/360); none: cash earns nothing.
-    pub deposit_rate: Option<(String, String)>,
+    /// Interest on positive cash, per currency, each in its day count (none: cash earns nothing).
+    pub deposit: Vec<CashRate>,
+    /// The day count of borrowing on the cash policy and of borrow fees.
+    pub day_count: DayCount,
     /// How the book may short securities.
     pub shorts: ShortPolicy,
     /// When trades settle.
@@ -673,7 +692,8 @@ impl Default for LedgerConfig {
             fx: None,
             conversion: FxConversion::default(),
             cash: CashPolicy::default(),
-            deposit_rate: None,
+            deposit: Vec::new(),
+            day_count: DayCount::Act360,
             shorts: ShortPolicy::default(),
             settlement: Settlement::default(),
             horizon: Horizon::Mark,
@@ -727,7 +747,21 @@ impl LedgerConfig {
             }
             CashPolicy::Unlimited => h.u64(3),
         }
-        pair(&mut h, self.deposit_rate.as_ref());
+        // A base-currency rate at ACT/360, the one convention there used to be, hashes as before.
+        match self.deposit.as_slice() {
+            [] => pair(&mut h, None),
+            [one] if one.currency == EntityId::NONE && one.day_count == DayCount::Act360 => pair(&mut h, Some(&one.rate)),
+            all => {
+                for d in all {
+                    h.u64(u64::from(d.currency.0));
+                    pair(&mut h, Some(&d.rate));
+                    h.str(d.day_count.name());
+                }
+            }
+        }
+        if self.day_count != DayCount::Act360 {
+            h.str(self.day_count.name());
+        }
         match &self.shorts {
             ShortPolicy::Forbid => h.u64(1),
             ShortPolicy::Borrow { fee_bp, available } => {

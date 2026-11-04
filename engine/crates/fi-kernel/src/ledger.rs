@@ -34,7 +34,7 @@ mod settlement;
 mod transitions;
 
 pub use config::{
-    Advance, Agreement, AgreementKind, Basis, Breach, CapitalFlows, CashPolicy, Collected, Constraint, ConstraintScope, Distribution, Distributor,
+    Advance, Agreement, AgreementKind, Basis, Breach, CapitalFlows, CashPolicy, CashRate, Collected, Constraint, ConstraintScope, Distribution, Distributor,
     DistributorRef, DistributorState, FlowCtx, FlowModel, FxConversion, Horizon, LedgerConfig, OpeningDue, Response, Routing, Settlement, ShortPolicy,
 };
 pub use execution::{EachOrder, Execution, OrderRecord, OrderStats, OrderStatus, WorkingOrder};
@@ -520,7 +520,8 @@ pub struct Ledger<'a> {
     row_slot: Vec<usize>,
     settle_lag: Vec<usize>,
     fx_series: Col<'a>,
-    deposit: Col<'a>,
+    /// Each currency slot's deposit rate and its day count.
+    deposit: Vec<(usize, Col<'a>, fi_terms::DayCount)>,
     borrow_rate: Col<'a>,
     available: Col<'a>,
     flows: Col<'a>,
@@ -612,7 +613,24 @@ impl<'a> Ledger<'a> {
         let lag_of: HashMap<EntityId, usize> = cfg.settlement.by_contract.iter().copied().collect();
         let settle_lag = records.entities().iter().map(|e| lag_of.get(e).copied().unwrap_or(cfg.settlement.lag)).collect();
         let fx_series = bind(ws, cfg.fx.as_ref(), true)?;
-        let deposit = bind(ws, cfg.deposit_rate.as_ref(), true)?;
+        let mut deposit = Vec::with_capacity(cfg.deposit.len());
+        for d in &cfg.deposit {
+            let c = if d.currency == EntityId::NONE { base } else { d.currency };
+            let slot = slots
+                .iter()
+                .position(|s| *s == c)
+                .ok_or_else(|| Error::Invalid(format!("a deposit rate for {}, a currency no contract of the book is in", ws.entities.name(d.currency))))?;
+            if d.day_count.needs_reference() {
+                return Err(Error::Invalid(format!("cash accrues by a day count without coupon periods, not {}", d.day_count)));
+            }
+            if deposit.iter().any(|(s, _, _)| *s == slot) {
+                return Err(Error::Invalid(format!("two deposit rates for {}", ws.entities.name(c))));
+            }
+            deposit.push((slot, bind(ws, Some(&d.rate), true)?, d.day_count));
+        }
+        if cfg.day_count.needs_reference() {
+            return Err(Error::Invalid(format!("cash accrues by a day count without coupon periods, not {}", cfg.day_count)));
+        }
         let borrow_rate = match &cfg.cash {
             CashPolicy::Borrow { rate, .. } => bind(ws, rate.as_ref(), true)?,
             _ => None,

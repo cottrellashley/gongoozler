@@ -40,13 +40,14 @@ pub use cash::{Cash, Rounding, RoundingMode};
 pub use composite::Composite;
 pub use contract::{Contract, Deferred, Flows, InCurrency, Role, StepCtx, Stepper, Terms, UnitStep, ValuationState};
 pub use entity::{Entities, EntityId};
+pub use fi_terms::DayCount;
 pub use fill::{Fill, FillModel, Order, ResearchFill};
 pub use graph::{Graph, GraphReport, Mode};
 pub use ledger::{
-    Advance, Agreement, AgreementKind, AgreementPath, Basis, Breach, BreachRecord, CapitalFlows, CashPolicy, Cause, Collected, Constraint, ConstraintScope,
-    DecisionCtx, DecisionModel, Distribution, Distributor, DistributorRef, DistributorState, EachOrder, Entry, EntryKind, ExecRef, Execution, FlowCtx,
-    FlowModel, FxConversion, Horizon, Ledger, LedgerConfig, LedgerOutput, LedgerState, OpeningDue, OrderRecord, OrderStats, OrderStatus, Phase, Policy,
-    Response, Routing, Settlement, ShortPolicy, StepOrder, Targets, WorkingOrder,
+    Advance, Agreement, AgreementKind, AgreementPath, Basis, Breach, BreachRecord, CapitalFlows, CashPolicy, CashRate, Cause, Collected, Constraint,
+    ConstraintScope, DecisionCtx, DecisionModel, Distribution, Distributor, DistributorRef, DistributorState, EachOrder, Entry, EntryKind, ExecRef, Execution,
+    FlowCtx, FlowModel, FxConversion, Horizon, Ledger, LedgerConfig, LedgerOutput, LedgerState, OpeningDue, OrderRecord, OrderStats, OrderStatus, Phase,
+    Policy, Response, Routing, Settlement, ShortPolicy, StepOrder, Targets, WorkingOrder,
 };
 pub use measure::{Face, FromSeries, Measure, Value};
 pub use model::{BatchModel, CrossSectionModel, Input, Model, ModelSpec, Shape, TimeSeriesModel, Vintaged};

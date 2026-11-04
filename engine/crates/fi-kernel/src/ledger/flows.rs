@@ -96,17 +96,24 @@ impl Ledger<'_> {
 
     pub(super) fn interest(&mut self, k: usize, t: Ts, acc: &mut Acc, fx_now: &[f64]) {
         let t0 = self.records.calendar().times()[k - 1];
-        let dt = (t.0 - t0.0) as f64 / Ts::DAY as f64 / 360.0;
-        let c = self.st.cash[0].to_f64();
+        // Each rate accrues in its own day count (review M3), from the interval's start to its end.
+        let (d0, d1) = (fi_terms::Date(t0.days() as i32), fi_terms::Date(t.days() as i32));
+        let fraction = |dc: fi_terms::DayCount| dc.fraction(d0, d1, None, None).unwrap_or(0.0);
+        let dt = fraction(self.cfg.day_count);
         let rate = |col: Col<'_>| read(col, EntityId::NONE, t0, Ts::MAX).filter(|r| r.is_finite());
-        if c > 0.0
-            && let Some(r) = rate(self.deposit)
-        {
-            let i = c * r * dt;
-            self.st.cash[0] += Cash::from_f64(i);
-            acc.income += i * fx_now[0];
-            self.log(t, EntryKind::Interest, EntityId::NONE, 0, 0.0, i, Cause::Interest, Some("deposit".into()));
+        for n in 0..self.deposit.len() {
+            let (s, col, dc) = self.deposit[n];
+            let c = self.st.cash[s].to_f64();
+            if c > 0.0
+                && let Some(r) = rate(col)
+            {
+                let i = c * r * fraction(dc);
+                self.st.cash[s] += Cash::from_f64(i);
+                acc.income += i * fx_now[s];
+                self.log(t, EntryKind::Interest, EntityId::NONE, s, 0.0, i, Cause::Interest, Some("deposit".into()));
+            }
         }
+        let c = self.st.cash[0].to_f64();
         if c < 0.0
             && let Some(r) = rate(self.borrow_rate)
         {
@@ -120,7 +127,11 @@ impl Ledger<'_> {
             if b > 0.0
                 && let Some(r) = rate(self.fin[j].rate)
             {
-                let i = b * r * dt;
+                let dc = match &self.cfg.financing[j].kind {
+                    AgreementKind::Secured { day_count, .. } => *day_count,
+                    AgreementKind::Csa { .. } => self.cfg.day_count,
+                };
+                let i = b * r * fraction(dc);
                 self.st.cash[0] -= Cash::from_f64(i);
                 acc.financing += i * fx_now[0];
                 let name = self.cfg.financing[j].name.clone();

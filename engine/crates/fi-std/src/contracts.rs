@@ -335,7 +335,7 @@ fn c_or_zero(v: Option<f64>) -> f64 {
     v.filter(|x| x.is_finite()).unwrap_or(0.0)
 }
 
-/// Cash: one unit is one unit of currency, earning a market-wide rate (Act/360), paid every
+/// Cash: one unit is one unit of currency, earning a market-wide rate in its day count, paid every
 /// interval. Without a rate it earns nothing, as most legacy frameworks assume.
 #[derive(Clone, Debug)]
 pub struct CashAccount {
@@ -343,6 +343,8 @@ pub struct CashAccount {
     pub entity: EntityId,
     /// Market-wide rate series and column (a fraction per year), read as of each interval's start.
     pub rate: Option<(String, String)>,
+    /// How it accrues.
+    pub day_count: fi_terms::DayCount,
 }
 
 impl Contract for CashAccount {
@@ -372,7 +374,7 @@ impl Contract for CashAccount {
 
     fn params(&self) -> u64 {
         let (s, c) = self.rate.as_ref().map_or(("", ""), |(s, c)| (s.as_str(), c.as_str()));
-        hash_strs(&["cash", s, c])
+        hash_strs(&["cash", s, c, if self.day_count == fi_terms::DayCount::Act360 { "" } else { self.day_count.name() }])
     }
 
     fn bind<'a>(&'a self, ws: &'a Workspace) -> Result<Box<dyn Stepper + 'a>> {
@@ -383,12 +385,16 @@ impl Contract for CashAccount {
             }
             None => None,
         };
-        Ok(Box::new(CashStep { rate }))
+        if self.day_count.needs_reference() {
+            return Err(fi_kernel::Error::Invalid(format!("cash accrues by a day count without coupon periods, not {}", self.day_count)));
+        }
+        Ok(Box::new(CashStep { rate, day_count: self.day_count }))
     }
 }
 
 struct CashStep<'a> {
     rate: Option<(&'a Series, usize)>,
+    day_count: fi_terms::DayCount,
 }
 
 impl Stepper for CashStep<'_> {
@@ -399,7 +405,7 @@ impl Stepper for CashStep<'_> {
     fn step(&mut self, from: Ts, to: Ts, _ctx: &StepCtx<'_>) -> UnitStep {
         let hit = self.rate.and_then(|(s, c)| s.asof(c, EntityId::NONE, from, Ts::MAX));
         let r = hit.map_or(0.0, |h| h.value);
-        let interest = r * (to.0 - from.0) as f64 / (360.0 * Ts::DAY as f64);
+        let interest = r * self.day_count.fraction(fi_terms::Date(from.days() as i32), fi_terms::Date(to.days() as i32), None, None).unwrap_or(0.0);
         let mut flows = Flows::default();
         flows.add_cash(Role::Income, interest);
         let terms = Terms::from_parts((0.0, 0.0), (0.0, 0.0), (1.0, 1.0), 0.0, &flows);

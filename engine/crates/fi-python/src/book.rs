@@ -11,9 +11,9 @@ use pyo3::types::PyDict;
 
 use fi_exec::{Capacity, PortfolioTrade, RfqFill, RfqProcess};
 use fi_kernel::{
-    Advance, Agreement, AgreementKind, Basis, Breach, CapitalFlows, CashPolicy, Constraint, ConstraintScope, EachOrder, EntityId, Execution, Face, FlowCtx,
-    FlowModel, FromSeries, FxConversion, HoldingPolicy, Horizon, LedgerConfig, Measure, OpeningDue, Phase, Response, Rounding, RoundingMode, Routing,
-    Settlement, ShortPolicy, StepOrder, Ts, Value, Workspace,
+    Advance, Agreement, AgreementKind, Basis, Breach, CapitalFlows, CashPolicy, CashRate, Constraint, ConstraintScope, DayCount, EachOrder, EntityId,
+    Execution, Face, FlowCtx, FlowModel, FromSeries, FxConversion, HoldingPolicy, Horizon, LedgerConfig, Measure, OpeningDue, Phase, Response, Rounding,
+    RoundingMode, Routing, Settlement, ShortPolicy, StepOrder, Ts, Value, Workspace,
 };
 
 /// A rounding term: `(unit, mode)`, the unit a number (0.01) or a currency code (`"USD"`,
@@ -441,7 +441,9 @@ pub struct PyBook {
     initial_cash: f64,
     holding: HoldingPolicy,
     cash: CashSpec,
-    deposit_rate: Option<String>,
+    /// Deposit rates: (currency, `series.column`, day count); no currency is the base.
+    deposit: Vec<(Option<String>, String, DayCount)>,
+    day_count: DayCount,
     shorts: ShortSpec,
     currency: Option<String>,
     fx: Option<String>,
@@ -475,6 +477,7 @@ enum AgreementSpec {
         sweep: bool,
         margin: Option<Vec<Ts>>,
         rounding: Option<Rounding>,
+        day_count: DayCount,
     },
     Csa {
         set: Vec<String>,
@@ -511,12 +514,13 @@ impl PyAgreement {
     ///   what it cannot pay stays called, and is an economic failure.
     /// * `rounding`: how capacity becomes whole minor units, `(unit or currency, mode)`, such as
     ///   `("USD", "down")`.
+    /// * `day_count`: how its interest accrues (default ACT/360).
     ///
     /// Collateral pledged to an earlier agreement in the book's list supports no later one.
     #[staticmethod]
     #[pyo3(signature = (
         name, collateral, *, basis = "market", concentration = None, limit = f64::INFINITY, rate = None, maturity = None, cure = 0, opening = 0.0,
-        draw = true, sweep = false, margin = None, rounding = None
+        draw = true, sweep = false, margin = None, rounding = None, day_count = "ACT/360"
     ))]
     #[allow(clippy::too_many_arguments)]
     fn secured(
@@ -533,7 +537,9 @@ impl PyAgreement {
         sweep: bool,
         margin: Option<Vec<Bound<'_, PyAny>>>,
         rounding: Option<&Bound<'_, PyAny>>,
+        day_count: &str,
     ) -> PyResult<Self> {
+        let day_count: DayCount = day_count.parse().map_err(|e: fi_terms::Error| PyValueError::new_err(e.to_string()))?;
         let margin = margin.map(|m| m.iter().map(convert::ts).collect::<PyResult<Vec<_>>>()).transpose()?.map(|mut m| {
             m.sort_unstable();
             m
@@ -561,7 +567,21 @@ impl PyAgreement {
         }
         Ok(Self {
             name,
-            spec: AgreementSpec::Secured { collateral: c, basis, concentration, limit, rate, maturity, cure, opening, draw, sweep, margin, rounding },
+            spec: AgreementSpec::Secured {
+                collateral: c,
+                basis,
+                concentration,
+                limit,
+                rate,
+                maturity,
+                cure,
+                opening,
+                draw,
+                sweep,
+                margin,
+                rounding,
+                day_count,
+            },
         })
     }
 
@@ -594,8 +614,9 @@ impl PyAgreement {
 impl PyAgreement {
     fn build(&self, names: &Names) -> PyResult<Agreement> {
         let kind = match &self.spec {
-            AgreementSpec::Secured { collateral, basis, concentration, limit, rate, maturity, cure, opening, draw, sweep, margin, rounding } => {
+            AgreementSpec::Secured { collateral, basis, concentration, limit, rate, maturity, cure, opening, draw, sweep, margin, rounding, day_count } => {
                 AgreementKind::Secured {
+                    day_count: *day_count,
                     collateral: collateral
                         .iter()
                         .map(|(n, s, x)| {
@@ -643,7 +664,10 @@ impl PyBook {
     /// * `cash`: `"forbid"` (the default: cash never goes below zero; a purchase it cannot pay
     ///   for is cut, counted), `"forbid_refuse"`, `"forbid_fail"`, `"borrow"` (up to
     ///   `borrow_limit`, at `borrow_rate`, a `"series.column"` rate) or `"unlimited"` (reported as
-    ///   an assumption). `deposit_rate` is earned on positive cash.
+    ///   an assumption). `deposit_rate` is earned on positive cash: a `"series.column"` rate for
+    ///   the base currency, or a dict by currency of `"series.column"` or
+    ///   `("series.column", day_count)` (default ACT/360), so cash in each currency earns its own
+    ///   rate. `day_count` is that of borrowing and borrow fees (default ACT/360).
     /// * `shorts`: `"forbid"` (the default for securities; derivatives are unaffected), `"borrow"`
     ///   (at `borrow_fee_bp`, up to `borrow_available`, a `"series.column"` of units available) or
     ///   `"unlimited"`.
@@ -678,7 +702,7 @@ impl PyBook {
     #[new]
     #[pyo3(signature = (
         policies, *, execution = None, initial_cash = 1e8, holding = "drift", cash = "forbid", borrow_limit = None, borrow_rate = None,
-        deposit_rate = None, shorts = "forbid", borrow_fee_bp = 0.0, borrow_available = None, currency = None, fx = None,
+        deposit_rate = None, day_count = "ACT/360", shorts = "forbid", borrow_fee_bp = 0.0, borrow_available = None, currency = None, fx = None,
         conversion_spread_bp = 0.0, auto_conversion = true, settlement = None, horizon = "mark", flows = None, time_in_force = 1,
         constraints = None, routing = "cash", journal = false, keep_holdings = false, opening = None, opening_dues = None, financing = None,
         responses = None, order = None, name = None
@@ -693,7 +717,8 @@ impl PyBook {
         cash: &str,
         borrow_limit: Option<f64>,
         borrow_rate: Option<String>,
-        deposit_rate: Option<String>,
+        deposit_rate: Option<&Bound<'_, PyAny>>,
+        day_count: &str,
         shorts: &str,
         borrow_fee_bp: f64,
         borrow_available: Option<String>,
@@ -716,6 +741,33 @@ impl PyBook {
         order: Option<Vec<String>>,
         name: Option<String>,
     ) -> PyResult<Self> {
+        let dc = |x: &str| -> PyResult<DayCount> { x.parse().map_err(|e: fi_terms::Error| PyValueError::new_err(e.to_string())) };
+        let day_count = dc(day_count)?;
+        let deposit = match deposit_rate.filter(|d| !d.is_none()) {
+            None => Vec::new(),
+            Some(d) => {
+                if let Ok(spec) = d.extract::<String>() {
+                    vec![(None, spec, DayCount::Act360)]
+                } else {
+                    let d = d.cast::<PyDict>().map_err(|_| PyTypeError::new_err("deposit_rate is \"series.column\" or a dict by currency"))?;
+                    let mut out = Vec::new();
+                    for (k, v) in d.iter() {
+                        let ccy: String = k.extract()?;
+                        let (spec, count) = match v.extract::<String>() {
+                            Ok(s) => (s, DayCount::Act360),
+                            Err(_) => {
+                                let (s, c): (String, String) =
+                                    v.extract().map_err(|_| PyTypeError::new_err("a deposit rate is \"series.column\" or (\"series.column\", day_count)"))?;
+                                (s, dc(&c)?)
+                            }
+                        };
+                        out.push((Some(ccy), spec, count));
+                    }
+                    out.sort_by(|a, b| a.0.cmp(&b.0));
+                    out
+                }
+            }
+        };
         let order = match order {
             None => StepOrder::default(),
             Some(o) => StepOrder::new(o.iter().map(|p| p.parse::<Phase>()).collect::<fi_kernel::Result<Vec<_>>>().map_err(to_py)?).map_err(to_py)?,
@@ -842,7 +894,8 @@ impl PyBook {
             initial_cash,
             holding,
             cash,
-            deposit_rate,
+            deposit,
+            day_count,
             shorts,
             currency,
             fx,
@@ -943,7 +996,19 @@ impl PyBook {
             fx: pair(self.fx.as_deref())?,
             conversion: self.conversion.clone(),
             cash,
-            deposit_rate: pair(self.deposit_rate.as_deref())?,
+            deposit: self
+                .deposit
+                .iter()
+                .map(|(ccy, rate, dc)| {
+                    let currency = match ccy {
+                        None => EntityId::NONE,
+                        Some(c) => ws.entities.get("currency", c).ok_or_else(|| PyValueError::new_err(format!("a deposit rate names no currency {c}")))?,
+                    };
+                    let rate = pair(Some(rate))?.ok_or_else(|| PyValueError::new_err("a deposit rate is \"series.column\""))?;
+                    Ok(CashRate { currency, rate, day_count: *dc })
+                })
+                .collect::<PyResult<_>>()?,
+            day_count: self.day_count,
             shorts,
             settlement: Settlement { lag: self.settlement.0, by_contract },
             horizon: self.horizon,

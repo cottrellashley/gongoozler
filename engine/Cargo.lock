@@ -993,6 +993,7 @@ dependencies = [
 name = "fi-kernel"
 version = "0.1.0"
 dependencies = [
+ "fi-terms",
  "proptest",
  "rayon",
 ]

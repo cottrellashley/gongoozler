@@ -46,10 +46,10 @@ build:
 	go build -o bin/gongoozler ./cmd/gongoozler
 
 fuzz:
-	go test ./internal/events -run '^$$' -fuzz '^FuzzDecode$$' -fuzztime $(FUZZTIME) -fuzzminimizetime 5s
-	go test ./internal/ring -run '^$$' -fuzz '^FuzzRing$$' -fuzztime $(FUZZTIME) -fuzzminimizetime 5s
-	go test ./internal/ring -run '^$$' -fuzz '^FuzzOpen$$' -fuzztime $(FUZZTIME) -fuzzminimizetime 5s
-	go test ./internal/header -run '^$$' -fuzz '^FuzzParse$$' -fuzztime $(FUZZTIME) -fuzzminimizetime 5s
+	./tools/fuzz.sh ./internal/events FuzzDecode $(FUZZTIME)
+	./tools/fuzz.sh ./internal/ring FuzzRing $(FUZZTIME)
+	./tools/fuzz.sh ./internal/ring FuzzOpen $(FUZZTIME)
+	./tools/fuzz.sh ./internal/header FuzzParse $(FUZZTIME)
 
 bench: build py-env
 	cd python && $(UV) run --quiet python ../tools/bench/bench.py

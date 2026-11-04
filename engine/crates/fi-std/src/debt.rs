@@ -72,7 +72,9 @@ pub struct DebtContract {
     /// entity named as the coupon's index.
     pub fixings: Option<(String, String)>,
     /// Its lifecycle events: a rows series keyed by the instrument, with any of the columns
-    /// `call` and `put` (price per 100), `default` (1), `recovery` (cash per 100 of face) and
+    /// `call` and `put` (price per 100), `default` (1), `recovery` (cash per 100 of the face it
+    /// settles), `recovered` (that face per unit of original face: default, all the claim has left,
+    /// so a claim with two routes of recourse is settled in parts and never twice) and
     /// `recovery_delay` (calendar days until it pays: the holder when it is determined is paid
     /// later), `writedown` and `writeup` (face per unit of original face), `factor` (face
     /// outstanding per unit of original face, as reported) and `extend` (1).
@@ -257,6 +259,7 @@ impl Contract for DebtContract {
                     default: col("default"),
                     recovery: col("recovery"),
                     recovery_delay: col("recovery_delay"),
+                    recovered: col("recovered"),
                     writedown: col("writedown"),
                     writeup: col("writeup"),
                     factor: col("factor"),
@@ -334,6 +337,7 @@ struct EventCols<'a> {
     default: Option<usize>,
     recovery: Option<usize>,
     recovery_delay: Option<usize>,
+    recovered: Option<usize>,
     writedown: Option<usize>,
     writeup: Option<usize>,
     factor: Option<usize>,
@@ -708,7 +712,18 @@ impl DebtStepper<'_> {
             if !self.defaulted {
                 ctx.fail(format!("{}: a recovery on {d} without a default", self.name));
             }
-            let cash = self.c.terms.round(self.balance * r / 100.0);
+            if self.done {
+                ctx.fail(format!("{}: a recovery on {d}, after its claim was settled: no claim recovers twice", self.name));
+                return;
+            }
+            // The face it settles: by default, all the claim has left.
+            let face = get(ev.recovered).unwrap_or(self.balance);
+            if face > self.balance + 1e-12 || face < 0.0 {
+                ctx.fail(format!("{}: a recovery on {d} settles {face} of face, but the claim has {} left", self.name, self.balance));
+                return;
+            }
+            let face = face.min(self.balance);
+            let cash = self.c.terms.round(face * r / 100.0);
             match get(ev.recovery_delay).filter(|x| *x > 0.0) {
                 // Determined now, paid later: the holder now owns it, whoever holds the claim then.
                 Some(days) => {
@@ -720,10 +735,13 @@ impl DebtStepper<'_> {
                 }
                 None => m.recovery_now += cash,
             }
-            m.retired_face += self.balance;
-            m.recovered_face += self.balance;
-            self.balance = 0.0;
-            self.done = true;
+            m.retired_face += face;
+            m.recovered_face += face;
+            self.balance -= face;
+            if self.balance <= 1e-12 {
+                self.balance = 0.0;
+                self.done = true;
+            }
         }
     }
 }
@@ -747,7 +765,11 @@ impl Stepper for DebtStepper<'_> {
         if d >= self.c.terms.maturity() && !self.on_extension {
             self.done = true;
         }
-        self.balance = if self.done { 0.0 } else { self.c.terms.balance(d).clamp(0.0, 1.0) };
+        // What the schedule repaid and the events reported before the first time stands: a
+        // seasoned pool starts at its reported factor.
+        if self.done {
+            self.balance = 0.0;
+        }
         let (clean, state, known) = self.clean_on(t0, ctx);
         self.mark = clean;
         self.accrued = self.accrued_on(d, ctx);

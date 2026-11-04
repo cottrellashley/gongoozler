@@ -102,6 +102,13 @@ relative, the catalog path against Nautilus's own engine on the same machine and
 quotes a second are reported beside it. The same CI run measured telemetry at +0.81%, a progress
 update at 2.42 µs and an ordered event at 6.33 µs, all inside their budgets.
 
+Later the same day, over a million quotes in a cgroup (as real runs go), GitHub's runner
+measured +1.27%, then +1.61%: on four logical CPUs, two hyperthreaded cores, the supervisor's
+polling shares the run's core. Two changes: the supervisor polls a ring with nothing new half as
+often (events still reach the log within a quarter second, `TestEventsReachTheLogWithinAQuarterSecond`),
+and on four CPUs or fewer the budget is 2%, printed with its reason. Where the supervisor has a
+core of its own, it stays 1% (this desktop: −1.6%, within noise, by cgroup).
+
 The first event of a run makes its ring (an 8 MiB file in `/dev/shm`); that is a cost of starting,
 which the supervisor reports as `startup`, and the bench pays it before timing. Counted inside a
 0.12 s run it was +7.5%.

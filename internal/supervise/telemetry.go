@@ -48,17 +48,26 @@ func newTelemetry(dir string, o Options, pl *pipeline, runID string) *telemetry 
 
 func (t *telemetry) loop() {
 	defer close(t.done)
-	tick := time.NewTicker(t.o.Poll)
-	defer tick.Stop()
+	// Rings with nothing new are polled half as often: a quiet run costs
+	// the supervisor fewer wakeups (on a small machine they compete with the run), and whatever
+	// arrives still reaches the log within a quarter second. Anything new polls at once again.
+	wait := t.o.Poll
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
 	for n := 0; ; n++ {
 		select {
 		case <-t.stopc:
 			return
-		case <-tick.C:
+		case <-timer.C:
 			if n%4 == 0 {
 				t.scan()
 			}
-			t.pass(false)
+			if t.pass(false) {
+				wait = t.o.Poll
+			} else {
+				wait = min(2*wait, 2*t.o.Poll)
+			}
+			timer.Reset(wait)
 		}
 	}
 }
@@ -79,12 +88,15 @@ func (t *telemetry) scan() {
 	sort.SliceStable(t.order, func(i, j int) bool { return t.ps[t.order[i]].r.Created < t.ps[t.order[j]].r.Created })
 }
 
-func (t *telemetry) pass(final bool) {
+// pass reads every ring once, and says whether any had something new.
+func (t *telemetry) pass(final bool) bool {
+	busy := false
 	for _, f := range t.order {
 		p := t.ps[f]
-		t.drain(p)
-		t.sample(p, final)
+		busy = t.drain(p) > 0 || busy
+		busy = t.sample(p, final) > 0 || busy
 	}
+	return busy
 }
 
 func (p *producer) grow(i int) {
@@ -94,9 +106,11 @@ func (p *producer) grow(i int) {
 	}
 }
 
-func (t *telemetry) sample(p *producer, final bool) {
+// sample shows the slots changed since they were last shown, and returns how many changed.
+func (t *telemetry) sample(p *producer, final bool) int {
 	now := time.Now()
-	for _, s := range p.r.Slots(p.last) {
+	changed := p.r.Slots(p.last)
+	for _, s := range changed {
 		p.grow(s.Index)
 		if s.After > uint64(p.seq) {
 			continue // it follows a record not read yet: after the next drain
@@ -117,10 +131,14 @@ func (t *telemetry) sample(p *producer, final bool) {
 		}
 		t.pl.producer(e)
 	}
+	return len(changed)
 }
 
-func (t *telemetry) drain(p *producer) {
+// drain hands on every record a ring holds, and returns how many.
+func (t *telemetry) drain(p *producer) int {
+	read := 0
 	p.r.Drain(func(payload []byte) {
+		read++
 		e, err := events.Decode(payload)
 		if err != nil {
 			t.protocolErrors++
@@ -169,6 +187,7 @@ func (t *telemetry) drain(p *producer) {
 		}
 		t.pl.producer(e)
 	})
+	return read
 }
 
 // Summary is what the run's telemetry lost or cut, and where it was when it ended.

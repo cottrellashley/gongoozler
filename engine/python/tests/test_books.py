@@ -301,3 +301,18 @@ def test_m4_the_money_weighted_return_is_the_rate_that_prices_the_investors_flow
     nav, cap, costs = led["nav"].to_list(), led["capital"].to_list(), led["costs"].to_list()
     flows = [(0.0, -(nav[0] - cap[0] + costs[0]))] + [(years[k], -c) for k, c in enumerate(cap) if c] + [(years[-1], nav[-1])]
     assert abs(sum(f * (1 + r) ** -t for t, f in flows)) < 1e-3, "the investors' flows are worth nothing at it"
+
+
+def test_m2_a_books_settings_group_into_what_they_configure():
+    """Review M2: grouped settings (cash, shorts, currency) build the same book as the flat ones."""
+    ws, rec, dates = world(days=30)
+    flat = fi.Strategy(once({"A": 1.2}), schedule="all", execution_lag=0, cash="borrow", borrow_limit=5e7, borrow_rate="sofr.rate", shorts="borrow",
+                       borrow_fee_bp=25.0, deposit_rate="sofr.rate", currency="USD", fx="fx.rate")
+    grouped = fi.Strategy(once({"A": 1.2}), schedule="all", execution_lag=0, cash=fi.cash.borrow(limit=5e7, rate="sofr.rate", deposit="sofr.rate"),
+                          shorts=fi.shorts.borrow(fee_bp=25.0), currency=fi.base_currency("USD", fx="fx.rate"))
+    a, b = ws.run(flat, rec), ws.run(grouped, rec)
+    assert a.version == b.version and a.ledger()["financing"].sum() > 0, "the same book: it borrowed"
+    with pytest.raises(TypeError, match="already sets"):
+        fi.Strategy(once({"A": 1.0}), cash=fi.cash.borrow(limit=1.0), borrow_limit=2.0)
+    with pytest.raises(ValueError, match="breach"):
+        fi.cash.forbid(breach="sometimes")

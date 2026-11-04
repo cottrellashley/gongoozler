@@ -98,7 +98,9 @@ __all__ = [
     "__version__",
     "asof",
     "attribution",
+    "base_currency",
     "bonds",
+    "cash",
     "cross_section",
     "decision",
     "deficiency_ledger",
@@ -110,6 +112,7 @@ __all__ = [
     "orders",
     "quantities",
     "ref",
+    "shorts",
     "transition",
     "valuation",
     "weights",
@@ -209,6 +212,60 @@ class flows:  # noqa: N801 - a namespace
         return ("model", f, settle)
 
 
+class cash:  # noqa: N801 - a namespace
+    """How a book's cash may go, as one setting: ``Strategy(..., cash=fi.cash.borrow(...))``.
+    ``deposit`` is earned on positive cash: a ``"series.column"`` rate for the base currency, or a
+    dict by currency of rates or ``(rate, day_count)``."""
+
+    @staticmethod
+    def forbid(*, breach: str = "scale", deposit: Any = None) -> dict:
+        """Cash never goes below zero. A purchase it cannot pay for is cut (``"scale"``),
+        refused (``"refuse"``) or fails the run (``"fail"``)."""
+        policy = {"scale": "forbid", "refuse": "forbid_refuse", "fail": "forbid_fail"}.get(breach)
+        if policy is None:
+            raise ValueError(f"breach is scale, refuse or fail, not {breach!r}")
+        return {"cash": policy, "deposit_rate": deposit}
+
+    @staticmethod
+    def borrow(*, limit: float | None = None, rate: str | None = None, day_count: str = "ACT/360", deposit: Any = None) -> dict:
+        """Borrow in the base currency, up to ``limit``, paying ``rate`` (``"series.column"``)
+        accrued in ``day_count``."""
+        return {"cash": "borrow", "borrow_limit": limit, "borrow_rate": rate, "day_count": day_count, "deposit_rate": deposit}
+
+    @staticmethod
+    def unlimited(*, deposit: Any = None) -> dict:
+        """Cash may go anywhere: an assumption the run reports."""
+        return {"cash": "unlimited", "deposit_rate": deposit}
+
+
+class shorts:  # noqa: N801 - a namespace
+    """How a book may short securities, as one setting: ``Strategy(..., shorts=fi.shorts.borrow(...))``."""
+
+    @staticmethod
+    def forbid() -> dict:
+        """No short positions in securities (derivatives are unaffected)."""
+        return {"shorts": "forbid"}
+
+    @staticmethod
+    def borrow(*, fee_bp: float = 0.0, available: str | None = None) -> dict:
+        """Shorts on borrowed securities, at ``fee_bp`` a year, up to ``available`` units
+        (``"series.column"``)."""
+        return {"shorts": "borrow", "borrow_fee_bp": fee_bp, "borrow_available": available}
+
+    @staticmethod
+    def unlimited() -> dict:
+        """Any short: an assumption the run reports."""
+        return {"shorts": "unlimited"}
+
+
+def base_currency(code: str, *, fx: str | None = None, conversion_spread_bp: float = 0.0, auto_conversion: bool = True) -> dict:
+    """A book's base currency and how it meets others, as one setting:
+    ``Strategy(..., currency=fi.base_currency("USD", fx="fx.rate"))``. ``fx`` gives base units per
+    unit of each currency; trades in another currency convert base cash automatically at
+    ``conversion_spread_bp``."""
+    return {"currency": code, "fx": fx, "conversion_spread_bp": conversion_spread_bp, "auto_conversion": auto_conversion}
+
+
 def Strategy(  # noqa: N802 - kept as a constructor-like shortcut
     decide: Decision,
     *,
@@ -221,7 +278,17 @@ def Strategy(  # noqa: N802 - kept as a constructor-like shortcut
     **book: Any,
 ) -> Book:
     """One policy over the whole book: `decide` on `schedule`, executing `execution_lag` steps
-    later through `fill` (a `Fill` or an `Execution`). Any other `Book` setting can be passed."""
+    later through `fill` (a `Fill` or an `Execution`). The book's settings group into what they
+    configure: ``cash=fi.cash.forbid/borrow/unlimited(...)``, ``shorts=fi.shorts.forbid/borrow/
+    unlimited(...)``, ``currency=fi.base_currency(...)``; any other `Book` setting can be passed as
+    it is (settlement, horizon, flows, constraints, financing, responses, order, journal)."""
+    for group in ("cash", "shorts", "currency"):
+        if isinstance(book.get(group), dict):
+            settings = book.pop(group)
+            clash = sorted(set(settings) & set(book))
+            if clash:
+                raise TypeError(f"{group}= already sets {clash}: give them there, not beside it")
+            book.update({k: v for k, v in settings.items() if v is not None or k == group})
     policy = Policy(decide, schedule=schedule, lag=execution_lag, name=name)
     return Book([policy], execution=fill, holding=holding, initial_cash=initial_cash, name=name, **book)
 

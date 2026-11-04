@@ -452,3 +452,25 @@ def test_a_floaters_value_uses_no_fixing_dated_after_it():
     (calm, after_calm), (wild, after_wild) = values(0.04), values(0.20)
     assert calm[1:] == wild[1:] and calm[0] != calm[0], "nothing before its date (and before issue, no value at all)"
     assert after_wild > after_calm, "and from its date, it is the coupon"
+
+
+def test_a_cds_index_starts_at_what_remains_after_its_names_earlier_credit_events():
+    """A name whose credit event came on or before a run's first time is out of the index from the
+    start: the value and the premium are on what remains, and nothing is paid for the name, whose
+    protection was settled before. Here one name defaulted in April and one on the first day."""
+    dates = weekdays(d("2025-05-06"), 60)
+    ws = fi.Workspace()
+    ws.series("cdx", pl.DataFrame({"index": "IDX", "date": dates, "price": 99.0}), entity="index", kind="cds", time="date", values={"price": "price"})
+    credit = pl.DataFrame({"name": ["A", "B"], "date": [d("2025-04-01"), dates[0]], "default": [1.0, 1.0], "recovery": [30.0, 40.0]})
+    ws.series("credit", credit, entity="name", kind="issuer", time="date", values={"default": "number", "recovery": "price"})
+    cds = ws.cds("IDX", "cdx.price", coupon=0.01, start="2025-03-20", maturity="2030-06-20", names={n: 0.25 for n in "ABCD"}, events="credit")
+    rec = ws.records(cds, fi.Calendar(dates))
+    accrued = 0.01 * (dates[0] - d("2025-03-20")).days / 360
+    assert rec.frame().filter(pl.col("entity") == "IDX")["value"][0] == pytest.approx(0.5 * (0.01 - accrued), rel=1e-12), "half the index remains"
+    buy = fi.Decision.python(lambda ctx: fi.quantities({"IDX": 1e7}) if ctx.k == 0 else None)
+    run = ws.run(fi.Strategy(buy, schedule="all", execution_lag=0, fill=fi.Fill.research(0.0)), rec)
+    moves = run.ledger()["cash"].diff().fill_null(0.0).to_list()
+    coupon = dates.index(d("2025-06-20"))
+    assert moves[coupon] == pytest.approx(-1e7 * 0.5 * 0.01 * 92 / 360, rel=1e-12), "the premium is on what remains"
+    assert all(abs(m) < 1e-6 for k, m in enumerate(moves) if k not in (0, coupon)), "nothing is paid for names already out"
+    assert run.max_identity_error < 1e-9

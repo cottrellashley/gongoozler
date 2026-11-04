@@ -6,7 +6,8 @@
 //! declared schedule (quarterly, ACT/360 as usual), and is paid on each reference entity's credit
 //! event: one less its recovery (per 100, observed) on that name's weight, less the premium the
 //! defaulted part has accrued since the last coupon. The index's outstanding notional (its factor)
-//! falls by the name's weight, and the premium after it is on what remains.
+//! falls by the name's weight, and the premium after it is on what remains. A name whose event came
+//! on or before the first time is out from the start, with nothing paid for it.
 //!
 //! **Value** is quoted as a price per 100 of current notional from the protection seller's side
 //! (100 less the upfront): the buyer's unit is worth the factor times (100 − price) / 100, less the
@@ -169,16 +170,32 @@ impl CdsStep<'_> {
 impl Stepper for CdsStep<'_> {
     fn init(&mut self, t0: Ts, ctx: &StepCtx<'_>) -> UnitStep {
         let d = date(t0);
-        let end = self.c.terms.schedule.end;
-        if d >= end {
+        // A name whose credit event came on or before the first time is out from the start: the
+        // notional outstanding is what remains, and its protection was settled before.
+        let mut known = Ts::MIN;
+        if let Some((es, dc, _, ids)) = &self.events {
+            for (i, id) in ids.iter().enumerate() {
+                let Some(e) = id else { continue };
+                let event = es.rows_between(*e, Ts::MIN, t0, Ts::MAX).into_iter().find(|&row| {
+                    let v = es.value(*dc, row);
+                    v.is_finite() && v != 0.0
+                });
+                if let Some(row) = event {
+                    self.factor -= self.c.terms.names[i].1;
+                    self.out[i] = true;
+                    known = known.max(es.row_known(row));
+                }
+            }
+        }
+        if d >= self.c.terms.schedule.end || self.factor <= 1e-12 {
             self.done = true;
             return UnitStep { state: ValuationState::Matured, known: t0, value: 0.0, ..UnitStep::default() };
         }
         self.paid = self.periods.iter().take_while(|p| p.pay <= d).count();
-        let (p, state, known) = self.price(t0, ctx);
+        let (p, state, k) = self.price(t0, ctx);
         self.mark = p;
         self.accrued = self.accrued_on(d) * self.factor;
-        UnitStep { state, known, value: self.clean(p) - self.accrued, face: self.factor, ..UnitStep::default() }
+        UnitStep { state, known: known.max(k), value: self.clean(p) - self.accrued, face: self.factor, ..UnitStep::default() }
     }
 
     fn step(&mut self, from: Ts, to: Ts, ctx: &StepCtx<'_>) -> UnitStep {

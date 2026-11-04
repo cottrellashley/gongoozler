@@ -130,12 +130,13 @@ Tests: `fi-terms`'s own, `fi-std`'s debt contract tests, `python/tests/test_debt
 - **A CDS** (`fi_std::CdsContract`, `ws.cds`), single-name or index: one unit of notional of
   protection bought. The premium is the coupon on the notional outstanding, on a declared
   schedule; each reference entity's credit event pays one less its recovery on its weight, less
-  the premium its part accrued, and reduces the notional by its weight. Valued from a price quoted
-  per 100 from the seller's side.
+  the premium its part accrued, and reduces the notional by its weight. A name whose event came on
+  or before the first time is out from the start, with nothing paid for it. Valued from a price
+  quoted per 100 from the seller's side.
 - Both are unfunded: a negative quantity needs no borrowed security.
 
-Tests: `python/tests/test_debt.py` (a swap is its legs' difference), `test_acceptance_debt.py`
-(the brief's R5).
+Tests: `python/tests/test_debt.py` (a swap is its legs' difference; an index that starts after
+some of its names' events), `test_acceptance_debt.py` (the brief's R5).
 
 ## Exchange-traded futures
 

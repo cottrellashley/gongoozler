@@ -355,6 +355,23 @@ impl PyWorkspace {
         Ok(PyContracts { inner: terms::debt_contracts(&mut self.ws, bonds, valuation, fixings, events, kind)? })
     }
 
+    /// An interest rate swap: the `receive` leg less the `pay` leg (each a `Bond`, on one unit of
+    /// notional, their principal exchanges cancelling), both valued as `valuation` says (a curve,
+    /// typically) with a floater's unfixed coupons at its forwards and its cash from `fixings`.
+    /// Unfunded: paying the received leg (a negative quantity) needs no borrowed security.
+    #[pyo3(signature = (name, receive, pay, valuation, *, fixings = None, kind = "swap"))]
+    fn swap(
+        &mut self,
+        name: &str,
+        receive: &Bound<'_, PyAny>,
+        pay: &Bound<'_, PyAny>,
+        valuation: &Bound<'_, PyAny>,
+        fixings: Option<&str>,
+        kind: &str,
+    ) -> PyResult<PyContracts> {
+        Ok(PyContracts { inner: terms::swap_contract(&mut self.ws, name, receive, pay, valuation, fixings, kind)? })
+    }
+
     /// A tradable level (an index, a total-return series): one unit is worth the level, in
     /// `currency` (default: the book's base).
     #[pyo3(signature = (entity, level, *, currency = None))]

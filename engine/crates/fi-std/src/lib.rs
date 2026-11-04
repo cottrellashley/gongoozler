@@ -8,6 +8,7 @@ pub mod decisions;
 pub mod models;
 pub mod optimise;
 pub mod structured;
+pub mod swap;
 pub mod synth;
 pub mod worlds;
 
@@ -16,4 +17,5 @@ pub use debt::{Compounding, DebtContract, Spread, Valuation};
 pub use decisions::{Branch, ExitAbove, Reinvest, Replay, RiskParity, RiskParityMethod, TopN, Trades};
 pub use models::{EwmaVol, Merton, NelsonSiegel, ZScore, merton, norm_cdf};
 pub use optimise::{Exposure, GroupCap, OnInfeasible, Optimise};
+pub use swap::SwapContract;
 pub use worlds::{Defaults, GaussianPaths, LoanTerms};

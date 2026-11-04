@@ -399,3 +399,56 @@ def test_a_static_scenario_reprices_the_book_off_a_stressed_curve():
     p = {c: bond.price(dates[-1], curve=fi.Curve(dates[-1], list(tenors.values()), [z] * 3), spread=0.01)["dirty"] for c, z in (("base", 0.04), ("stress", 0.05))}
     assert navs["stress"] - navs["base"] == pytest.approx(1e6 * (p["stress"] - p["base"]) / 100, rel=1e-9)
     assert modes == {"base": "policy backtest", "stress": "scenario"}
+
+
+def test_a_swap_is_its_received_leg_less_its_paid_leg_and_needs_no_borrow():
+    """An interest rate swap from two legs of terms: receive fixed, pay a term rate, valued off one
+    curve, principal exchanges cancelling. A payer (short one) needs no borrowed security."""
+    dates = weekdays(d("2025-03-03"), 70)
+    tenors = {"z1": 1.0, "z10": 10.0, "z30": 30.0}
+    level = [0.04 if k < 35 else 0.045 for k in range(len(dates))]
+    history = weekdays(d("2025-02-17"), 10) + dates
+    ws = fi.Workspace()
+    ws.series("curve", pl.DataFrame({"curve": "GOV", "date": dates, **{c: level for c in tenors}}), entity="curve", kind="curve", time="date",
+              values=dict.fromkeys(tenors, "number"), grid=True)
+    ws.series("fix", pl.DataFrame({"index": "TERM", "date": sorted(set(history)), "rate": 0.04}), entity="index", kind="index", time="date",
+              values={"rate": "number"}, grid=True)
+    fixed = fi.Bond("2025-03-03", "2030-03-04", 0.041, day_count="30/360", frequency=1)
+    floating = fi.Bond("2025-03-03", "2030-03-04", fi.Coupon.floating("TERM", lag=2), day_count="ACT/360", frequency=4)
+    swap = ws.swap("IRS", fixed, floating, fi.valuation.curve("curve", "GOV", tenors), fixings="fix.rate")
+    rec = ws.records(swap, fi.Calendar(dates))
+    v = rec.frame().filter(pl.col("entity") == "IRS")["value"].to_list()
+    c0 = fi.Curve(dates[0], list(tenors.values()), [0.04] * 3)
+    fx = {"TERM": {d("2025-02-27"): 0.04, d("2025-02-28"): 0.04}}  # the stub and the first regular period, fixed by now
+    legs = fixed.price(dates[0], curve=c0)["dirty"] - floating.price(dates[0], curve=c0, fixings=fx, forecast=c0)["dirty"]
+    assert v[0] == pytest.approx(legs / 100, abs=1e-12), "the received leg less the paid one"
+    payer = fi.Strategy(fi.Decision.python(lambda ctx: fi.quantities({"IRS": -1e7}) if ctx.k == 0 else None), schedule="all", execution_lag=0)
+    run = ws.run(payer, rec)
+    led = run.ledger()
+    assert run.final_holdings["IRS"] == -1e7 and run.short_limited == 0, "a derivative: shorting it needs no borrow"
+    assert led["price"][35] > 0, "rates up 50bp: the fixed payer gains"
+    assert run.max_identity_error < 1e-9
+
+
+def test_a_floaters_value_uses_no_fixing_dated_after_it():
+    """Point in time (I2): a floater valued off a curve projects the fixings not yet dated; a later
+    fixing in the data, however wild, changes no value before its date."""
+    dates = weekdays(d("2025-03-03"), 70)
+    tenors = {"z1": 1.0, "z10": 10.0}
+    frn = fi.Bond("2025-03-04", "2028-03-04", fi.Coupon.floating("TERM", lag=2), day_count="ACT/360", frequency=4)
+    later = d("2025-06-02")  # the second period's fixing
+
+    def values(wild: float):
+        ws = fi.Workspace()
+        ws.series("curve", pl.DataFrame({"curve": "GOV", "date": dates, "z1": 0.04, "z10": 0.04}), entity="curve", kind="curve", time="date",
+                  values=dict.fromkeys(tenors, "number"), grid=True)
+        fixings = [(f, 0.04) for f in (d("2025-02-28"),)] + [(later, wild)]
+        ws.series("fix", pl.DataFrame(fixings, schema=["date", "rate"], orient="row").with_columns(index=pl.lit("TERM")), entity="index", kind="index",
+                  time="date", values={"rate": "number"})
+        rec = ws.records(ws.debt({"FRN": frn}, fi.valuation.curve("curve", "GOV", tenors), fixings="fix.rate"), fi.Calendar(dates))
+        f = rec.frame()
+        return f.filter(pl.col("time").dt.date() < later)["value"].to_list(), f.filter(pl.col("time").dt.date() >= later)["value"][3]
+
+    (calm, after_calm), (wild, after_wild) = values(0.04), values(0.20)
+    assert calm[1:] == wild[1:] and calm[0] != calm[0], "nothing before its date (and before issue, no value at all)"
+    assert after_wild > after_calm, "and from its date, it is the coupon"

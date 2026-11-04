@@ -319,6 +319,19 @@ impl Fixings for SeriesFixings<'_> {
     }
 }
 
+/// Fixings as of a date: a valuation on `d` may use the fixings dated by `d`, never a later one
+/// the data happens to hold; a coupon's cash uses its own fixing, whenever it was.
+struct AsOf<'a> {
+    fixings: &'a dyn Fixings,
+    d: Date,
+}
+
+impl Fixings for AsOf<'_> {
+    fn fixing(&self, index: &str, date: Date) -> Option<f64> {
+        if date > self.d { None } else { self.fixings.fixing(index, date) }
+    }
+}
+
 enum SpreadSource<'a> {
     Constant(f64),
     Observed { s: &'a Series, col: usize },
@@ -465,8 +478,9 @@ impl DebtStepper<'_> {
             PriceSource::Yield { s, col, convention } => {
                 // A yield that cannot be priced (a fixing missing) is no price at all, never the
                 // yield read as one.
+                let known = AsOf { fixings: self.fixings(), d };
                 let h = observed(s, *col).and_then(|h| {
-                    analytics::price_from_yield(self.terms(), d, h.value, *convention, self.fixings()).ok().map(|p| fi_kernel::Hit {
+                    analytics::price_from_yield(self.terms(), d, h.value, *convention, &known).ok().map(|p| fi_kernel::Hit {
                         value: p.clean,
                         event: h.event,
                         known: h.known,
@@ -500,10 +514,11 @@ impl DebtStepper<'_> {
                     (true, Some((spread, sk)), Ok(curve)) => {
                         // A floater's coupons not fixed yet are valued at the curve's forwards;
                         // its cash still comes from observed fixings alone.
-                        let projected = fi_terms::curve::Projected::for_debt(self.terms(), self.fixings(), &curve);
+                        let asof = AsOf { fixings: self.fixings(), d };
+                        let projected = fi_terms::curve::Projected::for_debt(self.terms(), &asof, &curve);
                         let fx: &dyn Fixings = match &projected {
                             Some(p) => p,
-                            None => self.fixings(),
+                            None => &asof,
                         };
                         let p = analytics::price_from_curve(self.terms(), d, &curve, spread, fx).ok().map(|p| p.clean);
                         let k = known.max(sk);
@@ -531,10 +546,11 @@ impl DebtStepper<'_> {
     /// The clean price per 100 on `d` from `curve` and `spread`, its floater's unfixed coupons at
     /// that curve's forwards.
     fn price_off(&self, d: Date, curve: &Curve, spread: f64) -> Option<f64> {
-        let projected = fi_terms::curve::Projected::for_debt(self.terms(), self.fixings(), curve);
+        let known = AsOf { fixings: self.fixings(), d };
+        let projected = fi_terms::curve::Projected::for_debt(self.terms(), &known, curve);
         let fx: &dyn Fixings = match &projected {
             Some(p) => p,
-            None => self.fixings(),
+            None => &known,
         };
         analytics::price_from_curve(self.terms(), d, curve, spread, fx).ok().map(|p| p.clean)
     }

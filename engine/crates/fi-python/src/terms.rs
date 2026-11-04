@@ -868,3 +868,31 @@ pub(crate) fn debt_contracts(
     }
     Ok(out)
 }
+
+/// A swap: `receive` less `pay`, both legs valued as `value` says, on one entity of `kind`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn swap_contract(
+    ws: &mut Workspace,
+    name: &str,
+    receive: &Bound<'_, PyAny>,
+    pay: &Bound<'_, PyAny>,
+    value: &Bound<'_, PyAny>,
+    fixings: Option<&str>,
+    kind: &str,
+) -> PyResult<Vec<Arc<dyn Contract>>> {
+    let valuation = valuation(ws, value)?;
+    let fixings = fixings
+        .map(|f| -> PyResult<(String, String)> {
+            let (s, c) = split(f)?;
+            ws.series(s).and_then(|x| x.column(c)).map_err(crate::to_py)?;
+            Ok((s.to_owned(), c.to_owned()))
+        })
+        .transpose()?;
+    let leg = |b: &Bound<'_, PyAny>, which: &str| -> PyResult<Arc<Debt>> {
+        b.cast::<PyBond>().map(|x| x.get().debt.clone()).map_err(|_| PyTypeError::new_err(format!("{name}: its {which} leg is not a Bond")))
+    };
+    let (r, p) = (leg(receive, "receive")?, leg(pay, "pay")?);
+    let entity = ws.entities.intern(kind, name);
+    let make = |terms: Arc<Debt>| DebtContract { entity, terms, valuation: valuation.clone(), fixings: fixings.clone(), events: None };
+    Ok(vec![Arc::new(fi_std::SwapContract { entity, receive: make(r), pay: make(p) })])
+}

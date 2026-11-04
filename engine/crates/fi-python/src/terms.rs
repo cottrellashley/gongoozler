@@ -896,3 +896,54 @@ pub(crate) fn swap_contract(
     let make = |terms: Arc<Debt>| DebtContract { entity, terms, valuation: valuation.clone(), fixings: fixings.clone(), events: None };
     Ok(vec![Arc::new(fi_std::SwapContract { entity, receive: make(r), pay: make(p) })])
 }
+
+/// A CDS: protection on `names` (one reference entity, or an index's constituents and weights).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn cds_contract(
+    ws: &mut Workspace,
+    name: &str,
+    price: &str,
+    coupon: f64,
+    start: &Bound<'_, PyAny>,
+    maturity: &Bound<'_, PyAny>,
+    names: Option<&Bound<'_, PyAny>>,
+    frequency: u32,
+    day_count: &str,
+    calendar: Option<PyRef<'_, PyBusinessCalendar>>,
+    business_day: &str,
+    events: Option<&str>,
+) -> PyResult<Vec<Arc<dyn Contract>>> {
+    let (series, column) = split(price)?;
+    let s = ws.series(series).map_err(crate::to_py)?;
+    s.column(column).map_err(crate::to_py)?;
+    let entity = s
+        .entities()
+        .into_iter()
+        .find(|e| ws.entities.name(*e) == name)
+        .ok_or_else(|| PyValueError::new_err(format!("{series} has no {name}, the CDS to price")))?;
+    if let Some(e) = events {
+        ws.series(e).map_err(crate::to_py)?;
+    }
+    if frequency == 0 || !12u32.is_multiple_of(frequency) {
+        return Err(PyValueError::new_err(format!("{frequency} premium payments a year do not divide twelve months")));
+    }
+    let mut schedule = Schedule::new(day(start)?, day(maturity)?, 12 / frequency);
+    if let Some(c) = calendar {
+        schedule.calendar = c.cal.clone();
+    }
+    schedule.adjust = parse::<BusinessDay>(business_day)?;
+    let names: Vec<(String, f64)> = match names {
+        None => vec![(name.to_owned(), 1.0)],
+        Some(n) => match n.extract::<String>() {
+            Ok(one) => vec![(one, 1.0)],
+            Err(_) => {
+                let mut v: Vec<(String, f64)> = n.extract::<HashMap<String, f64>>()?.into_iter().collect();
+                v.sort_by(|a, b| a.0.cmp(&b.0));
+                v
+            }
+        },
+    };
+    let terms = fi_std::Cds { coupon, schedule, day_count: parse::<DayCount>(day_count)?, names };
+    let c = fi_std::CdsContract { entity, terms: Arc::new(terms), price: (series.to_owned(), column.to_owned()), events: events.map(str::to_owned) };
+    Ok(vec![Arc::new(c)])
+}

@@ -355,6 +355,34 @@ impl PyWorkspace {
         Ok(PyContracts { inner: terms::debt_contracts(&mut self.ws, bonds, valuation, fixings, events, kind)? })
     }
 
+    /// A credit default swap, single-name or index: one unit is one unit of notional of protection
+    /// bought (a seller holds a negative quantity). The buyer pays `coupon` a year on the notional
+    /// outstanding, on a schedule from `start` to `maturity` (`frequency` a year, `day_count`,
+    /// adjusted on `calendar`), and is paid one less the recovery on each reference entity's credit
+    /// event. `names` is the reference entity (default: `name`), or an index's `{name: weight}`; a
+    /// name's event reduces the index's notional by its weight. `price` (`series.column`, keyed by
+    /// `name`) is quoted per 100 of current notional from the seller's side (100 less the upfront);
+    /// `events` names a series keyed by reference entity with `default` (1) and `recovery` (per 100).
+    #[pyo3(signature = (name, price, *, coupon, start, maturity, names = None, frequency = 4, day_count = "ACT/360", calendar = None, business_day = "following", events = None))]
+    #[allow(clippy::too_many_arguments)]
+    fn cds(
+        &mut self,
+        name: &str,
+        price: &str,
+        coupon: f64,
+        start: &Bound<'_, PyAny>,
+        maturity: &Bound<'_, PyAny>,
+        names: Option<&Bound<'_, PyAny>>,
+        frequency: u32,
+        day_count: &str,
+        calendar: Option<PyRef<'_, terms::PyBusinessCalendar>>,
+        business_day: &str,
+        events: Option<&str>,
+    ) -> PyResult<PyContracts> {
+        let inner = terms::cds_contract(&mut self.ws, name, price, coupon, start, maturity, names, frequency, day_count, calendar, business_day, events)?;
+        Ok(PyContracts { inner })
+    }
+
     /// An interest rate swap: the `receive` leg less the `pay` leg (each a `Bond`, on one unit of
     /// notional, their principal exchanges cancelling), both valued as `valuation` says (a curve,
     /// typically) with a floater's unfixed coupons at its forwards and its cash from `fixings`.

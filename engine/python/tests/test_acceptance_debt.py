@@ -145,3 +145,31 @@ def test_p08_an_inflation_coupon_on_the_index_as_booked_or_as_revised():
         coupons[outcomes] = led["cash"][k] - led["cash"][k - 1]
     assert coupons["as_booked"] == pytest.approx(1e6 * 0.005 * 315.0 / 300.0, rel=1e-9)
     assert coupons["restated"] == pytest.approx(1e6 * 0.005 * 318.0 / 300.0, rel=1e-9)
+
+
+def test_r05_a_cds_index_constituent_default_settles_and_the_index_carries_on_smaller():
+    """R5: protection bought on an index of four names, 1% a year quarterly on ACT/360. A name
+    defaults with a recovery of 40: the buyer is paid 60% of its quarter of the notional, less the
+    premium that quarter accrued; the index carries on at three quarters, and its next premium is
+    on what remains."""
+    dates = weekdays(D("2025-03-20"), 90)
+    default = D("2025-05-06")
+    ws = fi.Workspace()
+    ws.series("cdx", pl.DataFrame({"index": "IDX", "date": dates, "price": 99.0}), entity="index", kind="cds", time="date", values={"price": "price"})
+    ws.series("credit", pl.DataFrame({"name": ["B"], "date": [default], "default": [1.0], "recovery": [40.0]}), entity="name", kind="issuer", time="date",
+              values={"default": "number", "recovery": "price"})
+    cds = ws.cds("IDX", "cdx.price", coupon=0.01, start="2025-03-20", maturity="2030-06-20", names={n: 0.25 for n in "ABCD"}, events="credit")
+    rec = ws.records(cds, fi.Calendar(dates))
+    buy = fi.Decision.python(lambda ctx: fi.quantities({"IDX": 1e7}) if ctx.k == 0 else None)
+    run = ws.run(fi.Strategy(buy, schedule="all", execution_lag=0, fill=fi.Fill.research(0.0)), rec)
+    led = run.ledger()
+    at = led["time"].dt.date().to_list().index
+    accrued = 0.01 * (default - D("2025-03-20")).days / 360
+    assert led["cash"][at(default)] - led["cash"][at(default) - 1] == pytest.approx(1e7 * 0.25 * (0.60 - accrued), rel=1e-12)
+    coupon = D("2025-06-20")
+    assert led["cash"][at(coupon)] - led["cash"][at(coupon) - 1] == pytest.approx(-1e7 * 0.75 * 0.01 * 92 / 360, rel=1e-12), "on what remains"
+    face = rec.frame().filter(pl.col("entity") == "IDX")
+    assert led["other"][at(default)] == pytest.approx(1e7 * 0.25 * (0.60 - 0.01), rel=1e-9), "protection against the mark it settles"
+    assert run.max_identity_error < 1e-9 and face.height == len(dates)
+    sold = ws.run(fi.Strategy(fi.Decision.python(lambda ctx: fi.quantities({"IDX": -1e7}) if ctx.k == 0 else None), schedule="all", execution_lag=0), rec)
+    assert sold.final_nav - 1e8 == pytest.approx(-(run.final_nav - 1e8), rel=1e-9), "the seller's account is the buyer's, reversed"

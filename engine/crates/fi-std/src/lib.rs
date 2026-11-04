@@ -2,6 +2,7 @@
 //! synthetic universe. Everything here is a definition built from the core objects; none of it is
 //! part of the core.
 
+pub mod cds;
 pub mod contracts;
 pub mod debt;
 pub mod decisions;
@@ -12,6 +13,7 @@ pub mod swap;
 pub mod synth;
 pub mod worlds;
 
+pub use cds::{Cds, CdsContract};
 pub use contracts::{CashAccount, DailyFuture, SuppliedBond, TotalReturn};
 pub use debt::{Compounding, DebtContract, Spread, Valuation};
 pub use decisions::{Branch, ExitAbove, Reinvest, Replay, RiskParity, RiskParityMethod, TopN, Trades};

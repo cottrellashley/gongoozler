@@ -122,6 +122,21 @@ type per product.
 
 Tests: `fi-terms`'s own, `fi-std`'s debt contract tests, `python/tests/test_debt.py`.
 
+## Swaps and CDS
+
+- **An interest rate swap** (`fi_std::SwapContract`, `ws.swap`) is a received leg less a paid
+  leg, each a debt's terms on one unit of notional, their principal exchanges cancelling, both
+  stepped as debt and valued off one curve; its value, flows and P&L are the legs' differences.
+- **A CDS** (`fi_std::CdsContract`, `ws.cds`), single-name or index: one unit of notional of
+  protection bought. The premium is the coupon on the notional outstanding, on a declared
+  schedule; each reference entity's credit event pays one less its recovery on its weight, less
+  the premium its part accrued, and reduces the notional by its weight. Valued from a price quoted
+  per 100 from the seller's side.
+- Both are unfunded: a negative quantity needs no borrowed security.
+
+Tests: `python/tests/test_debt.py` (a swap is its legs' difference), `test_acceptance_debt.py`
+(the brief's R5).
+
 ## Exchange-traded futures
 
 A future's terms are a Nautilus `FuturesContract` (`fi_exec::ExchangeFuture`; `ws.future` builds

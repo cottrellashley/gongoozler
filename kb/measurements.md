@@ -146,3 +146,8 @@ where parallel, by `fi_research::machine`), 4 Nov 2026, at 9,000 bonds × 2,520 
 
 The same run's telemetry budget: +0.24% (0.856 s with events off, 0.858 s supervised, by cgroup),
 after the supervisor began polling quiet rings half as often.
+
+A later full-scale run landed on a slower runner: its arithmetic loop said 1.53×, yet the research
+run took 90 ms (47 ms on the first): the run streams 22.7 M cells of records, and its cost follows
+memory, which the arithmetic loop does not measure. The calibration now also chases pointers through
+32 MiB (memory latency) and takes the slower of the two ratios.

@@ -593,6 +593,7 @@ enum DecisionSpec {
     Replay { series: String, column: String, universe: Option<Vec<String>>, quantities: bool },
     Trades { series: String, column: String, universe: Option<Vec<String>> },
     Reinvest { into: Vec<String>, keep: f64 },
+    Roll { chain: Vec<(String, Ts)>, contracts: f64, days_before: i64 },
     Branch { at: Ts, before: Py<PyDecisionSpec>, after: Py<PyDecisionSpec> },
     Python { decide: Py<PyAny>, name: String, params: u64 },
 }
@@ -652,6 +653,16 @@ impl PyDecisionSpec {
         Self { spec: DecisionSpec::Reinvest { into, keep } }
     }
 
+    /// A futures roll: hold `contracts` units of the first contract of `chain` (pairs of a
+    /// contract and its expiration) more than `days_before` days from expiry, and none of the
+    /// others. Negative `contracts` hold a short.
+    #[staticmethod]
+    #[pyo3(signature = (chain, contracts, *, days_before = 5))]
+    fn roll(chain: Vec<(String, Bound<'_, PyAny>)>, contracts: f64, days_before: i64) -> PyResult<Self> {
+        let chain = chain.iter().map(|(n, x)| Ok((n.clone(), convert::ts(x)?))).collect::<PyResult<_>>()?;
+        Ok(Self { spec: DecisionSpec::Roll { chain, contracts, days_before } })
+    }
+
     /// An intervention from a time: `before` decides until `at`, `after` from then on. A branch
     /// whose `after` is `before` reproduces the run without it.
     #[staticmethod]
@@ -678,6 +689,7 @@ impl PyDecisionSpec {
             DecisionSpec::Replay { series, column, quantities, .. } => format!("Decision.replay({series}.{column}, quantities={quantities})"),
             DecisionSpec::Trades { series, column, .. } => format!("Decision.trades({series}.{column})"),
             DecisionSpec::Reinvest { into, .. } => format!("Decision.reinvest({into:?})"),
+            DecisionSpec::Roll { chain, contracts, days_before } => format!("Decision.roll({} contracts, {contracts}, days_before={days_before})", chain.len()),
             DecisionSpec::Branch { at, before, after } => format!("Decision.branch({at}, {}, {})", before.get().__repr__(), after.get().__repr__()),
             DecisionSpec::Python { name, .. } => format!("Decision.python({name})"),
         }
@@ -692,6 +704,7 @@ impl PyDecisionSpec {
             DecisionSpec::Replay { series, column, .. } => format!("replay({series}.{column})"),
             DecisionSpec::Trades { series, column, .. } => format!("trades({series}.{column})"),
             DecisionSpec::Reinvest { .. } => "reinvest".into(),
+            DecisionSpec::Roll { .. } => "roll".into(),
             DecisionSpec::Branch { at, before, after } => format!("branch({at}: {} then {})", before.get().name(), after.get().name()),
             DecisionSpec::Python { name, .. } => name.clone(),
         }
@@ -721,6 +734,10 @@ impl PyDecisionSpec {
             DecisionSpec::Reinvest { into, keep } => {
                 let into = into.iter().map(|n| names.id(n)).collect::<PyResult<_>>()?;
                 (Arc::new(Reinvest { into, keep: *keep }), Vec::new())
+            }
+            DecisionSpec::Roll { chain, contracts, days_before } => {
+                let chain = chain.iter().map(|(n, x)| Ok((names.id(n)?, *x))).collect::<PyResult<_>>()?;
+                (Arc::new(fi_exec::Roll { chain, contracts: *contracts, days_before: *days_before }), Vec::new())
             }
             DecisionSpec::Branch { at, before, after } => {
                 let (b, mut e) = before.get().build(py, names)?;
@@ -1463,6 +1480,47 @@ impl PyWorkspace {
         let e = self.entity_in(series, entity)?;
         let ccy = currency.map(|c| self.ws.entities.intern("currency", c));
         Ok(PyContracts { inner: vec![in_currency(Arc::new(DailyFuture { entity: e, series: series.into(), column: column.into(), multiplier }), ccy)] })
+    }
+
+    /// An exchange-traded future, its terms a Nautilus `FuturesContract` built from these fields
+    /// and checked by Nautilus: `symbol` on `venue`, of `underlying`, listed at `activation` and
+    /// expiring at `expiration`, in `currency`, with its tick (`price_increment`, whose decimals
+    /// are its precision), `multiplier` and `lot_size`. One unit is one contract, marked to market
+    /// each step at `price` (`series.column`, keyed by `name`), so its P&L is variation margin.
+    #[pyo3(signature = (name, price, *, expiration, multiplier, price_increment, activation = None, underlying = None, venue = "XCME", currency = "USD", lot_size = 1.0, asset_class = "debt"))]
+    #[allow(clippy::too_many_arguments)]
+    fn future(
+        &mut self,
+        name: &str,
+        price: &str,
+        expiration: &Bound<'_, PyAny>,
+        multiplier: f64,
+        price_increment: &str,
+        activation: Option<&Bound<'_, PyAny>>,
+        underlying: Option<&str>,
+        venue: &str,
+        currency: &str,
+        lot_size: f64,
+        asset_class: &str,
+    ) -> PyResult<PyContracts> {
+        let (series, column) = split(price)?;
+        self.ws.series(series).and_then(|s| s.column(column)).map_err(to_py)?;
+        let e = self.entity_in(series, name)?;
+        let instrument = book::futures_contract(
+            name,
+            venue,
+            underlying.unwrap_or(name),
+            activation,
+            expiration,
+            currency,
+            price_increment,
+            multiplier,
+            lot_size,
+            asset_class,
+        )?;
+        let ccy = Some(self.ws.entities.intern("currency", currency));
+        let c = fi_exec::ExchangeFuture { entity: e, instrument, price: (series.into(), column.into()), currency: ccy };
+        Ok(PyContracts { inner: vec![Arc::new(c)] })
     }
 
     /// The run's manifest: everything its output depends on besides the data's values (series

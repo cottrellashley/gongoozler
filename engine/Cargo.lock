@@ -961,17 +961,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
-name = "fi-acceptance"
-version = "0.1.0"
-dependencies = [
- "fi-exec",
- "fi-kernel",
- "fi-research",
- "fi-std",
- "serde_json",
-]
-
-[[package]]
 name = "fi-bench"
 version = "0.1.0"
 dependencies = [
@@ -988,6 +977,7 @@ dependencies = [
  "fi-kernel",
  "nautilus-core",
  "nautilus-model",
+ "ustr",
 ]
 
 [[package]]
@@ -1032,11 +1022,14 @@ dependencies = [
  "fi-ring",
  "fi-std",
  "fi-terms",
+ "nautilus-core",
+ "nautilus-model",
  "numpy",
  "polars",
  "polars-arrow",
  "pyo3",
  "pyo3-arrow",
+ "ustr",
 ]
 
 [[package]]

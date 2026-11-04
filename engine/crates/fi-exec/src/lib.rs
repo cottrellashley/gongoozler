@@ -14,6 +14,10 @@
 //! Both implement the kernel's [`FillModel`], so the same strategy runs at research fidelity or
 //! with these models, and the ledger books the difference as cost.
 
+pub mod futures;
+
+pub use futures::{ExchangeFuture, Roll};
+
 use std::collections::HashMap;
 use std::sync::Arc;
 

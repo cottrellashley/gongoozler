@@ -116,6 +116,19 @@ type per product.
 
 Tests: `fi-terms`'s own, `fi-std`'s debt contract tests, `python/tests/test_debt.py`.
 
+## Exchange-traded futures
+
+A future's terms are a Nautilus `FuturesContract` (`fi_exec::ExchangeFuture`; `ws.future` builds
+one through Nautilus's own builder and checks). One unit is one contract, marked to market at each
+step: variation margin, the multiplier times the change in the settlement price on the tick, as a
+performance flow, so a unit's value is zero. Before activation it is pending; at expiration it
+settles a last time and expires. A roll is a policy (`fi_exec::Roll`): a number of contracts in
+the first contract of a chain more than a given number of days from expiry, moved to the next in
+one decision, so the contract change, the margin and the exposure reconcile through the same
+identity.
+
+Tests: `python/tests/test_futures.py` (the brief's R4).
+
 ## The ledger's step
 
 Each step, at time t:

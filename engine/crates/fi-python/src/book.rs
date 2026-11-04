@@ -973,3 +973,56 @@ impl PyBook {
         Ok((Book { name: self.label(), policies, execution, config }, errors))
     }
 }
+
+/// A Nautilus `FuturesContract` from its fields, checked by Nautilus's own builder.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn futures_contract(
+    symbol: &str,
+    venue: &str,
+    underlying: &str,
+    activation: Option<&Bound<'_, PyAny>>,
+    expiration: &Bound<'_, PyAny>,
+    currency: &str,
+    price_increment: &str,
+    multiplier: f64,
+    lot_size: f64,
+    asset_class: &str,
+) -> PyResult<nautilus_model::instruments::FuturesContract> {
+    use nautilus_core::UnixNanos;
+    use nautilus_model::enums::AssetClass;
+    use nautilus_model::identifiers::{InstrumentId, Symbol, Venue};
+    use nautilus_model::types::{Currency, Price, Quantity};
+    let nanos = |t: &Bound<'_, PyAny>| -> PyResult<UnixNanos> {
+        Ok(UnixNanos::from(u64::try_from(crate::convert::ts(t)?.0).map_err(|_| PyValueError::new_err("a time before 1970"))?))
+    };
+    let class = match asset_class {
+        "debt" => AssetClass::Debt,
+        "index" => AssetClass::Index,
+        "fx" => AssetClass::FX,
+        "commodity" => AssetClass::Commodity,
+        "equity" => AssetClass::Equity,
+        a => return Err(PyValueError::new_err(format!("no asset class {a:?} (debt, index, fx, commodity, equity)"))),
+    };
+    let tick =
+        <Price as std::str::FromStr>::from_str(price_increment).map_err(|e| PyValueError::new_err(format!("price_increment {price_increment:?}: {e}")))?;
+    let ccy = Currency::try_from_str(currency).ok_or_else(|| PyValueError::new_err(format!("Nautilus's currency registry has no {currency}")))?;
+    let qty = |x: f64, what: &str| Quantity::new_checked(x, 0).map_err(|e| PyValueError::new_err(format!("{what} {x}: {e}")));
+    let activation = activation.map(nanos).transpose()?.unwrap_or_default();
+    nautilus_model::instruments::FuturesContract::builder()
+        .instrument_id(InstrumentId::new(Symbol::from(symbol), Venue::from(venue)))
+        .raw_symbol(Symbol::from(symbol))
+        .asset_class(class)
+        .exchange(ustr::Ustr::from(venue))
+        .underlying(ustr::Ustr::from(underlying))
+        .activation_ns(activation)
+        .expiration_ns(nanos(expiration)?)
+        .currency(ccy)
+        .price_precision(tick.precision)
+        .price_increment(tick)
+        .multiplier(qty(multiplier, "multiplier")?)
+        .lot_size(qty(lot_size, "lot_size")?)
+        .ts_event(activation)
+        .ts_init(activation)
+        .build()
+        .map_err(|e| PyValueError::new_err(format!("Nautilus refuses the future {symbol}: {e}")))
+}

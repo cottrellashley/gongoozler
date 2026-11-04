@@ -10,3 +10,4 @@ publish.workspace = true
 fi-kernel = { workspace = true }
 nautilus-core = { workspace = true }
 nautilus-model = { workspace = true }
+ustr = "1"

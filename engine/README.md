@@ -16,8 +16,10 @@ configuration files) and fed with any Arrow frame (Polars, pandas, pyarrow, Duck
 - **Point in time by construction:** every input is a bitemporal observation, and decisions see
   only what was known.
 - **Deals:** CLO and ABS waterfalls, tests, triggers, rights and manager counterfactuals.
-- **Nautilus and Polars where they are the established implementation:** Nautilus's L2 order book
-  fills orders, its currency registry gives minor units and its analysis crate the statistics;
+- **Nautilus and Polars where they are the established implementation:** futures are Nautilus
+  `FuturesContract`s (multiplier, tick, listing and expiry as Nautilus checks them) and roll as a
+  policy; Nautilus's L2 order book fills orders, its currency registry gives minor units and its
+  analysis crate the statistics;
   Polars carries frames in and out without copying.
 - **Watched:** under `gongoozler run`, the engine's Rust loops report their progress into the
   watcher's ring, and `gongoozler.fi` keeps a run's results (spec/results.md at the repo's root).
@@ -91,7 +93,7 @@ where; nothing is silently skipped or defaulted.
 | `fi-std` | Definitions on the kernel:<br>• contracts: debt from its terms (`DebtContract`), total return, bonds with supplied marks and flows (reconciled), cash, daily-settled futures<br>• deals: collateral books with their waterfalls, tests, triggers, reserves, deficiency ledgers and rights<br>• world generators: Gaussian paths, correlated defaults<br>• models: z-score, Nelson–Siegel, EWMA volatility, Merton<br>• decisions: top N, risk parity, replay, recorded trades, branches, reinvestment<br>• the synthetic universe | `fi-kernel`, `fi-terms`, `rayon`, `libm` |
 | `fi-research` | Books, runs and parallel sweeps; run modes; NAV reconciliation; worlds; the run manifest, capability checks and the support matrix | `fi-kernel`, `rayon` |
 | `fi-io` | Frames in, checked against their declarations; results out as frames | Polars 0.55 |
-| `fi-exec` | Fills: Nautilus L2 order books, request for quote, recorded quotes. Execution processes: RFQ over time, portfolio trades and shared capacity | `nautilus-model` 0.67 |
+| `fi-exec` | Exchange-traded futures whose terms are Nautilus's `FuturesContract` (`ExchangeFuture`) and rolls between them (`Roll`). Fills: Nautilus L2 order books, request for quote, recorded quotes. Execution processes: RFQ over time, portfolio trades and shared capacity | `nautilus-model` 0.67 |
 | `fi-metrics` | Sharpe, Sortino, drawdown, CAGR, tracking error, capture ratios | `nautilus-analysis` 0.67 |
 | `fi-ring` | The watcher's ring (gongoozler's spec/ring.md), written from Rust | `memmap2`, `crc32fast` |
 | `fi-python` | The `fi_engine` Python module | pyo3 0.30, pyo3-arrow 0.20 |

@@ -17,9 +17,10 @@ on a server.
   stream. A feed can be written once to a Nautilus catalog and streamed in Rust by every run after.
 - **Boxes:** a run that needs more than the desktop has goes to a server, which runs it in a box of
   its own, watched the same way.
-- **A fixed income backtester is built in** (`engine/`, `gongoozler[fi]`): bonds, loans and deals
-  defined by their terms, a ledger that books every coupon, call, default and trade exactly, in
-  Rust with Polars and Nautilus, reporting its progress to the watcher from its own loops.
+- **A fixed income backtester is built in** (`engine/`, `gongoozler[fi]`): bonds, swaps, CDS,
+  futures and deals defined by their terms, a ledger that books every coupon, call, default and
+  trade exactly, in Rust with Polars and Nautilus, reporting its progress to the watcher from its
+  own loops.
 
 ## Quick start (Linux, or WSL on Windows)
 
@@ -64,21 +65,29 @@ gongoozler run --remote examples/in_a_box.py          # or let a file's [tool.go
   averaged in arrears) and inflation-linked coupons, amortisation, calls, puts and extensions.
 - **Analytics:** prices from curves and yields, yield and Z-spread solvers, durations, and
   bump-and-reprice sensitivities that carry their definition.
-- **A ledger that cannot be fooled:** bitemporal data seen only as it was known, P&L by role
+- **A ledger that books exactly:** bitemporal data seen only as it was known, P&L by role
   (income, price, principal, other, financing, currency, costs) checked against NAV every step,
   cash in exact decimals, trade and settlement dates, receivables, a coupon gone ex paid to its
-  seller, financing agreements and margin, holding transitions (exchanges, conversions, delayed
-  recoveries), and a step order that is declared rather than assumed.
+  seller, cash in each currency earning its own rate, financing agreements and margin, holding
+  transitions (exchanges, conversions, delayed recoveries), and a step order that is declared
+  rather than assumed.
+- **Derivatives:** futures as Nautilus `FuturesContract`s, rolled as a policy; interest rate swaps
+  from two legs of terms; CDS, single-name or index.
+- **Decisions and execution:** rules, Python callables, or an optimiser under bounds, exposure
+  bands and group caps that journals its status and binding constraints; fills by order book,
+  request for quote, bid list, primary allocation or recorded quotes.
+- **Attribution:** P&L by role, and for curve-valued debt by carry, curve and spread; money- and
+  time-weighted returns.
 - **Deals:** CLO and ABS waterfalls, tests, triggers and manager counterfactuals as books.
-- **Rust inside, Python outside:** frames from anywhere through Arrow into Polars, Nautilus's
-  order book and statistics, runs and sweeps with the GIL released.
+- **Rust inside, Python outside:** frames from anywhere through Arrow into Polars, runs and sweeps
+  with the GIL released.
 
 ```python
 import fi_engine as fi
 import gongoozler.fi as gzfi
 
 ws = fi.Workspace()
-ws.series("marks", marks, entity="isin", kind="bond", time="date", values={"clean": "price"})
+ws.series("marks", marks, entity="isin", kind="bond", time="date", values={"clean": "price", "signal": "number"})
 bonds = fi.bonds(terms)                                       # a terms table, one row a bond
 records = ws.records(ws.debt(bonds, fi.valuation.clean("marks.clean")), ws.calendar("marks"))
 run = gzfi.run(ws, fi.Strategy(fi.Decision.top_n("marks.signal", 50)), records)   # results kept

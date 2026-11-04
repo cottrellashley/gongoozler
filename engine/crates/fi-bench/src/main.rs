@@ -1,22 +1,27 @@
 //! Speed tests against the spec's budgets (docs/spec.md, "Performance budgets") on the synthetic
 //! universe. The budgets are for 9,000 bonds × 2,520 days on 16 cores. `--scale` shrinks the bond
 //! count, for machines with less memory, and the budgets that grow with it (records, models). A
-//! research run's budget stays at 50 ms: its cost is set by holdings and days. A sweep must beat
-//! the same variants run one by one by the thread count, up to 4×.
+//! research run's budget stays at 50 ms: its cost is mostly holdings and days.
 //!
 //! ```text
-//! cargo run --release -p fi-bench -- [--scale 0.25] [--check]
+//! cargo run --release -p fi-bench -- [--scale 0.25] [--check] [--tolerance 1.5]
 //! ```
 //!
 //! `--check` exits non-zero if any budget is missed. Spike S7 is measured too: the model graph's
 //! cost against hand-written loops over the same data.
 //!
-//! **The budgets are the spec's machine's.** A fixed single-threaded loop is timed here and against
-//! its time on the machine the budgets were set on (`fi_research::machine`, a 16-thread desktop, 3 Nov
-//! 2026): a slower core scales every budget by that ratio, and a machine with fewer than 16 threads
-//! scales the parallel ones by the threads it lacks. Both factors are printed. A sweep must beat
-//! the same variants run one by one by half the thread count, up to 2×: a runner's threads are
-//! often hyperthreads of half as many cores.
+//! **The budgets are the spec's machine's.** Two fixed single-threaded loops, of arithmetic and of
+//! memory latency, are timed here and against their times on the machine the budgets were set on
+//! (`fi_research::machine`, a 16-thread desktop, 3 Nov 2026): a slower core scales every budget by
+//! the larger ratio, and a machine with fewer than 16 threads scales the parallel ones by the
+//! threads it lacks. Both factors are printed, with the CPU. A sweep must beat the same variants
+//! run one by one by half the thread count, up to 2×: a runner's threads are often hyperthreads of
+//! half as many cores.
+//!
+//! **The calibration is approximate elsewhere.** On CI's runners the engine slowed by up to 1.5×
+//! more than the loops did (kb/measurements.md at the repository's root). `--tolerance X` holds a
+//! calibrated budget to X times its value, and says so; CI passes 1.5. A ratio measured here, the
+//! sweep's, is held exactly everywhere, and so is every budget on the machine they were set on.
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -31,6 +36,9 @@ struct Row {
     name: String,
     seconds: f64,
     budget: Option<f64>,
+    /// The budget is the spec's, scaled to this machine by the calibration (not a ratio measured
+    /// here).
+    calibrated: bool,
     note: String,
 }
 
@@ -44,18 +52,22 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     let scale: f64 = args.iter().position(|a| a == "--scale").and_then(|i| args.get(i + 1)).and_then(|s| s.parse().ok()).unwrap_or(1.0);
     let check = args.iter().any(|a| a == "--check");
+    let tolerance: f64 = args.iter().position(|a| a == "--tolerance").and_then(|i| args.get(i + 1)).and_then(|s| s.parse::<f64>().ok()).unwrap_or(1.0).max(1.0);
     let bonds = ((9_000.0 * scale).round() as usize).max(10);
     let days = 2_520;
     let threads = rayon::current_num_threads();
     let (serial_budget, parallel_budget) = fi_research::machine::factors(threads);
     println!("fi-bench: {bonds} bonds × {days} days ({} cells), {threads} threads, scale {scale}", bonds * days);
-    println!("budgets × {serial_budget:.2} for this machine's cores (calibrated), × {parallel_budget:.2} where parallel");
+    println!("budgets × {serial_budget:.2} for this machine's cores (calibrated), × {parallel_budget:.2} where parallel; CPU: {}", cpu());
+    if tolerance > 1.0 {
+        println!("calibrated budgets held to {tolerance}× their value: the calibration's error on other machines");
+    }
     let mut rows: Vec<Row> = Vec::new();
 
     let mut ws = Workspace::new(KnowledgePolicy::AS_KNOWN);
     let cfg = synth::Config { bonds, days, seed: 42, amortising_every: 5, pik_every: 11, gap_rate: 0.0, issuers: 200, govts: 0 };
     let (u, s) = time(|| synth::build(&mut ws, &cfg).expect("synthetic universe"));
-    rows.push(Row { name: "generate the synthetic universe".into(), seconds: s, budget: None, note: "not budgeted: test data".into() });
+    rows.push(Row { name: "generate the synthetic universe".into(), seconds: s, budget: None, calibrated: false, note: "not budgeted: test data".into() });
 
     // Unit records: every bond, every day.
     let contracts = u.bond_contracts();
@@ -64,6 +76,7 @@ fn main() -> ExitCode {
         name: "unit records (marks + accrued + flows)".into(),
         seconds: s,
         budget: Some(2.0 * scale * parallel_budget),
+        calibrated: true,
         note: format!("{:.0} M records/s", (bonds * days) as f64 / s / 1e6),
     });
 
@@ -87,9 +100,10 @@ fn main() -> ExitCode {
         name: "cross-section z-score by sector, graph".into(),
         seconds: s_graph,
         budget: Some(2.0 * scale * parallel_budget),
+        calibrated: true,
         note: format!("S7: {:.1}× the hand-written loop; outputs equal: {same}", s_graph / s_hand),
     });
-    rows.push(Row { name: "cross-section z-score by sector, hand-written".into(), seconds: s_hand, budget: None, note: "baseline".into() });
+    rows.push(Row { name: "cross-section z-score by sector, hand-written".into(), seconds: s_hand, budget: None, calibrated: false, note: "baseline".into() });
 
     // S7: a time-series model through the graph, against a hand-written loop.
     let mut g2 = Graph::new();
@@ -101,9 +115,10 @@ fn main() -> ExitCode {
         name: "time-series EWMA volatility, graph".into(),
         seconds: s_graph,
         budget: Some(2.0 * scale * parallel_budget),
+        calibrated: true,
         note: format!("S7: {:.1}× the hand-written loop", s_graph / s_hand),
     });
-    rows.push(Row { name: "time-series EWMA volatility, hand-written".into(), seconds: s_hand, budget: None, note: "baseline".into() });
+    rows.push(Row { name: "time-series EWMA volatility, hand-written".into(), seconds: s_hand, budget: None, calibrated: false, note: "baseline".into() });
 
     // One research run on cached records: monthly top-300, no optimiser.
     let strategy = |n: usize, bp: f64, holding: HoldingPolicy| Strategy {
@@ -120,8 +135,9 @@ fn main() -> ExitCode {
     rows.push(Row {
         name: format!("one research run: monthly top-{n}, {} rebalances", u.calendar.month_ends().len()),
         seconds: s,
-        // A run's cost is set by its holdings and calendar, which do not shrink with the scale.
+        // A run's cost is mostly its holdings and calendar, which do not shrink with the scale.
         budget: Some(0.05 * serial_budget),
+        calibrated: true,
         note: format!("{} trades, identity error {:.1e}", out.trades, out.max_identity_error),
     });
 
@@ -138,16 +154,21 @@ fn main() -> ExitCode {
         name: "sweep: 64 variants in parallel".into(),
         seconds: s,
         budget: Some(s_serial / (threads.min(4) as f64 / 2.0).max(1.0)),
+        calibrated: false,
         note: format!("{ok}/64 ok, {:.0} runs/s, {:.1}× the serial {s_serial:.3}s, same accounts: {same}", 64.0 / s, s_serial / s),
     });
 
     println!();
     println!("| test | seconds | budget | status | note |");
     println!("| --- | ---: | ---: | --- | --- |");
-    let mut failed = 0;
+    let (mut failed, mut within) = (0, 0);
     for r in &rows {
         let (budget, status) = match r.budget {
             Some(b) if r.seconds <= b => (format!("{b:.3}"), "pass"),
+            Some(b) if r.calibrated && r.seconds <= b * tolerance => {
+                within += 1;
+                (format!("{b:.3}"), "pass, within the calibration's error")
+            }
             Some(b) => {
                 failed += 1;
                 (format!("{b:.3}"), "MISS")
@@ -156,11 +177,22 @@ fn main() -> ExitCode {
         };
         println!("| {} | {:.4} | {budget} | {status} | {} |", r.name, r.seconds, r.note);
     }
+    if within > 0 {
+        println!("\n{within} budget(s) held only to {tolerance}× their calibrated value");
+    }
     if check && failed > 0 {
         println!("\n{failed} budget(s) missed");
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
+}
+
+/// The CPU's model, as Linux names it.
+fn cpu() -> String {
+    let info = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+    info.lines()
+        .find_map(|l| l.strip_prefix("model name").and_then(|r| r.split_once(':')).map(|(_, m)| m.trim().to_owned()))
+        .unwrap_or_else(|| "unknown".into())
 }
 
 /// The same z-score by group as the graph's model, written directly over the grid.

@@ -4,6 +4,10 @@ The spec's budgets are for 9,000 contracts × 2,520 days on 16 cores. These test
 ``FI_SPEED_BONDS`` bonds (default 1,000) × 2,520 days and scale the size-dependent budgets
 linearly. Budgets the spec does not set are marked "ours": they bound what Python adds at the
 boundary. Run with ``-s`` to see the table.
+
+Every budget here is scaled to this machine by the calibration, which is approximate on other
+machines (kb/measurements.md at the repository's root): ``FI_SPEED_TOLERANCE`` (CI: 1.5) holds them
+to that many times their value. On the machine the budgets were set on, it is 1.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ DAYS = 2520
 SCALE = BONDS / 9000
 # The budgets are the spec's machine's: this one's speed against it scales them (fi_research::machine).
 SERIAL, PARALLEL = fi._native.machine_factors()
+TOLERANCE = max(1.0, float(os.environ.get("FI_SPEED_TOLERANCE", "1")))
 ROWS: list[tuple[str, float, float, str]] = []
 
 
@@ -42,14 +47,17 @@ def best(f, n: int = 3):
 
 
 def check(name: str, seconds: float, budget: float, note: str = "") -> None:
+    if budget < seconds <= budget * TOLERANCE:
+        note += f"; within the calibration's error ({TOLERANCE}×)"
     ROWS.append((name, seconds, budget, note))
-    assert seconds <= budget, f"{name}: {seconds:.4f}s over its {budget:.4f}s budget"
+    assert seconds <= budget * TOLERANCE, f"{name}: {seconds:.4f}s over its {budget:.4f}s budget (× {TOLERANCE} allowed)"
 
 
 @pytest.fixture(scope="module", autouse=True)
 def table():
     yield
-    print(f"\n\nfi_engine from Python: {BONDS} bonds × {DAYS} days; budgets × {SERIAL:.2f} single-threaded, × {PARALLEL:.2f} parallel\n")
+    held = f", held to {TOLERANCE}×" if TOLERANCE > 1 else ""
+    print(f"\n\nfi_engine from Python: {BONDS} bonds × {DAYS} days; budgets × {SERIAL:.2f} single-threaded, × {PARALLEL:.2f} parallel{held}\n")
     print("| test | seconds | budget | note |\n| --- | ---: | ---: | --- |")
     for name, s, b, note in ROWS:
         print(f"| {name} | {s:.4f} | {b:.4f} | {note} |")

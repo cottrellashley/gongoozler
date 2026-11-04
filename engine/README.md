@@ -289,7 +289,10 @@ scale, 9,000 bonds × 2,520 days (about 3.5 GB of memory; CI runs it). Rust, at 
 | One research run: top 300, monthly, 116 rebalances | 0.042 | 0.05 | 59,322 trades; identity error 8e-15 |
 | Sweep: 64 variants in parallel | 0.324 | 0.591 | 7.3× serial; same accounts |
 
-The research run's budget is not scaled: its cost depends on holdings and days, not the universe.
+The research run's budget is not scaled: its cost is mostly holdings and days (at full scale, a
+quarter to a third more than at a quarter scale, on every runner measured). Elsewhere, each budget
+is scaled by the calibration (`fi_research::machine`); CI holds those to 1.5× their value, the
+calibration's error on its runners, and this machine holds them exactly (`kb/measurements.md`).
 
 At the spec's full scale, 9,000 × 2,520, on GitHub's 4-thread runner (CI, 4 Nov): unit records in
 1.13 s and one research run in 47 ms, both inside the spec's budgets for 16 cores, and a sweep 2.6×

@@ -1,5 +1,7 @@
 # CI runs what `make check` runs, then the fuzzers briefly and the budgets (make bench). GitHub
-# Actions reads only YAML; nothing else in the project is configured in it.
+# Actions reads only YAML; nothing else in the project is configured in it. TOLERANCE=1.5: the
+# engine's speed budgets are calibrated to the runner, and the calibration can be that far out on
+# a machine other than the budgets' own (kb/measurements.md).
 name: ci
 on:
   push:
@@ -25,13 +27,13 @@ jobs:
         with:
           workspaces: engine
       - name: make check (gofmt, ruff format, go vet, golangci-lint, ruff, mypy, the engine's rustfmt, clippy and tests, go test -race, pytest)
-        run: make check
+        run: make check TOLERANCE=1.5
       - name: make fuzz
         run: make fuzz FUZZTIME=20s
       - name: make bench (the budgets)
-        run: make bench
+        run: make bench TOLERANCE=1.5
       - name: make bench-full (the engine's budgets at the spec's scale, about 3.5 GB)
-        run: make bench-full
+        run: make bench-full TOLERANCE=1.5
 
   image:
     runs-on: ubuntu-24.04

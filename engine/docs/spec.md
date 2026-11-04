@@ -228,7 +228,10 @@ Each family is a Rust trait with built-ins, and a Python bridge where Python use
 ## Performance budgets
 
 On a synthetic universe of 9,000 contracts × 2,520 days, on 16 cores (`make bench-full`; `make
-bench` runs them at a quarter scale, scaled):
+bench` runs them at a quarter scale, scaled). On another machine they are scaled by its speed
+against these cores (`fi_research::machine`) and held to `TOLERANCE` times that, since the
+calibration is approximate there (CI: 1.5); a ratio measured on the machine itself, as the sweep's,
+is held exactly:
 
 | Work | Budget |
 | --- | --- |

@@ -1,6 +1,10 @@
 # fi-engine: build, test and measure. `make help` lists the targets.
 
 CARGO ?= cargo
+# How far past a calibrated speed budget a run may go on a machine other than the one the budgets
+# were set on: the calibration's error there (kb/measurements.md at the repository's root). CI
+# passes 1.5; on the budgets' own machine they hold exactly. The Python speed tests read it too.
+TOLERANCE ?= 1
 PY := .venv/bin/python
 # The Python the bindings build against (pyo3 reads it).
 export PYO3_PYTHON := $(abspath $(PY))
@@ -25,13 +29,13 @@ python: $(PY) ## Build the Python extension into .venv (release)
 	.venv/bin/maturin develop --release
 
 python-test: python ## Python: data, models, runs, examples, and the Python speed tests
-	$(PY) -m pytest -q
+	FI_SPEED_TOLERANCE=$(TOLERANCE) $(PY) -m pytest -q
 
 bench: ## Speed tests against the spec's budgets, at a quarter of full scale
-	$(CARGO) run --release -p fi-bench -- --scale 0.25 --check
+	$(CARGO) run --release -p fi-bench -- --scale 0.25 --check --tolerance $(TOLERANCE)
 
 bench-full: ## The same at full scale: 9,000 bonds × 2,520 days (about 3.5 GB of memory)
-	$(CARGO) run --release -p fi-bench -- --scale 1 --check
+	$(CARGO) run --release -p fi-bench -- --scale 1 --check --tolerance $(TOLERANCE)
 
 clippy: $(PY) ## Lints on every crate and test, warnings as errors
 	$(CARGO) clippy --workspace --all-targets -- -D warnings

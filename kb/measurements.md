@@ -151,3 +151,25 @@ A later full-scale run landed on a slower runner: its arithmetic loop said 1.53�
 run took 90 ms (47 ms on the first): the run streams 22.7 M cells of records, and its cost follows
 memory, which the arithmetic loop does not measure. The calibration now also chases pointers through
 32 MiB (memory latency) and takes the slower of the two ratios.
+
+That did not close the gap. The research run, best of three, on three runners and on the machine
+the budgets were set on:
+
+| Machine | Factor for its cores | Research run, quarter scale | Full scale | Slowdown against here ÷ factor |
+| --- | ---: | ---: | ---: | ---: |
+| Here, 16 threads, 4 Nov (`fi-bench --scale 0.25`, six runs) | 1.00–1.06 | 31.2–36.0 ms | not run (3.5 GB) | — |
+| CI run 41756672794 | 1.05 (arithmetic) | 35.9 ms | 47.0 ms | 1.10 |
+| CI run 41758690064 | 1.53 (arithmetic) | 70.3 ms | 90.1 ms | 1.47 |
+| CI run 41761230319 | 1.71 (arithmetic and memory) | 71.0 ms | 87.8 ms | 1.33 |
+
+(The slowdown is the quarter-scale run against 31.2 ms here.) The serial sweep of 64 runs at full
+scale slowed as much: 2.53 s, 5.18 s and 6.05 s. So on CI's runners the engine slowed by up to
+1.5× more than the calibration said. Page size is not the cause: with transparent huge pages off
+for the process (`prctl(PR_SET_THP_DISABLE)`), the research run here took the same 31–32 ms, and
+the memory loop 6% longer. CI therefore holds the calibrated budgets to 1.5× their value
+(`TOLERANCE=1.5`, printed beside each budget it was needed for). The sweep's budget, a ratio
+measured on the runner, is held exactly. On this machine, `make bench` holds every budget exactly.
+
+The research run's cost is mostly holdings and days, but not entirely: at full scale it took
+1.24–1.31× its quarter-scale time on every runner, with the same holdings over a universe four times
+as large.

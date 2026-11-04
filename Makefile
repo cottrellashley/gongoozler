@@ -1,7 +1,7 @@
 # gongoozler. `make check` is what CI runs: formatting, lints, type checks, and every test, Go's
 # under the race detector, and the engine's own (engine/Makefile). `make bench` holds the budgets
-# (tools/bench/bench.py, and the engine's at full scale). `make fuzz` fuzzes what reads bytes a run
-# wrote.
+# (tools/bench/bench.py, and the engine's at full scale; `TOLERANCE` passes to the engine's, see
+# engine/Makefile). `make fuzz` fuzzes what reads bytes a run wrote.
 
 GO_TEST_FLAGS ?= -race
 FUZZTIME      ?= 30s

@@ -1,8 +1,11 @@
 //! This machine against the one the speed budgets were set on (docs/spec.md, "Performance
 //! budgets": 16 threads, 3 Nov 2026). Two fixed single-threaded loops, one of arithmetic and one of
-//! memory latency, are timed here and compared with their times there: a slower core scales every budget by that ratio, and fewer than 16 threads
-//! scale the parallel ones by the threads missing. The bench and the Python speed tests both use
-//! it, and print the factors, so a budget held on a small runner says what it was held to.
+//! memory latency, are timed here and compared with their times there: a slower core scales every
+//! budget by the larger ratio, and fewer than 16 threads scale the parallel ones by the threads
+//! missing. The bench and the Python speed tests both use it, and print the factors, so a budget
+//! held on a small runner says what it was held to. The loops are not the engine: on CI's runners
+//! the engine slowed by up to 1.5× more than they did (kb/measurements.md at the repository's
+//! root), which is why the bench takes a tolerance there.
 
 use std::time::Instant;
 

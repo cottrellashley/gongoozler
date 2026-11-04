@@ -173,3 +173,61 @@ def test_r05_a_cds_index_constituent_default_settles_and_the_index_carries_on_sm
     assert run.max_identity_error < 1e-9 and face.height == len(dates)
     sold = ws.run(fi.Strategy(fi.Decision.python(lambda ctx: fi.quantities({"IDX": -1e7}) if ctx.k == 0 else None), schedule="all", execution_lag=0), rec)
     assert sold.final_nav - 1e8 == pytest.approx(-(run.final_nav - 1e8), rel=1e-9), "the seller's account is the buyer's, reversed"
+
+
+def test_p09_a_futures_roll_an_fx_hedge_and_a_redemption_reconcile_in_one_book():
+    """P9: a USD book holds a EUR bond from its terms, hedges its currency with EUR futures, holds
+    ten Treasury futures rolled before expiry, and meets a redemption by selling. Actual
+    contracts, margin and each currency's cash reconcile; the redemption is met by a feasible
+    action, never by cash going below zero."""
+    import numpy as np
+
+    dates = weekdays(D("2025-01-06"), 120)
+    rng = np.random.default_rng(9)
+    eurusd = 1.08 * np.exp(np.cumsum(rng.normal(0, 0.004, len(dates))))
+    ty = 110 + np.cumsum(rng.normal(0, 0.2, len(dates)))
+    chain = [("TYH5", D("2025-03-20")), ("TYM5", D("2025-06-18")), ("TYU5", D("2025-09-19"))]
+    ws = fi.Workspace()
+    ws.currency("USD")
+    ws.series("fx", pl.DataFrame({"ccy": "EUR", "date": dates, "rate": eurusd}), entity="ccy", kind="currency", time="date", values={"rate": "number"}, grid=True)
+    ws.series("marks", pl.DataFrame({"isin": "BUND", "date": dates, "clean": 101.0}), entity="isin", kind="bond", time="date", values={"clean": "price"}, grid=True)
+    fut = [(n, d, float(p) - 0.25 * j) for j, (n, x) in enumerate(chain) for d, p in zip(dates, ty, strict=True) if d <= x]
+    fut += [("6EU5", d, float(r)) for d, r in zip(dates, eurusd, strict=True)]
+    ws.series("futures", pl.DataFrame(fut, schema=["contract", "date", "settle"], orient="row"), entity="contract", kind="future", time="date", values={"settle": "price"})
+    ws.series("subs", pl.DataFrame({"date": [dates[60]], "amount": [-3e7]}), time="date", values={"amount": "number"})
+    bund = fi.Bond("2024-07-04", "2034-07-04", 0.025, day_count="ACT/ACT ICMA", frequency=1, currency="EUR", calendar=fi.BusinessCalendar.weekends())
+    contracts = ws.debt({"BUND": bund}, fi.valuation.clean("marks.clean"))
+    for n, x in chain:
+        contracts = contracts + ws.future(n, "futures.settle", expiration=x, multiplier=1000, price_increment="0.015625", currency="USD")
+    contracts = contracts + ws.future("6EU5", "futures.settle", expiration="2025-09-15", multiplier=125_000, price_increment="0.00005", currency="USD", asset_class="fx")
+    rec = ws.records(contracts, fi.Calendar(dates))
+
+    @fi.decision
+    def hedge(ctx):
+        q = ctx.holdings.get("BUND", 0.0)
+        eur = q * ctx.values()[ctx.contracts.index("BUND")]
+        return fi.quantities({"6EU5": -round(eur / 125_000)})
+
+    book = fi.Book(
+        [
+            fi.Policy(fi.Decision.python(lambda ctx: {"BUND": 0.8} if ctx.k == 0 else None), schedule="all", lag=0, scope=["BUND"], name="bond"),
+            fi.Policy(fi.Decision.roll(chain, 10, days_before=5), schedule="all", lag=0, scope=[n for n, _ in chain], name="roll"),
+            fi.Policy(hedge, schedule="all", lag=0, scope=["6EU5"], name="hedge", priority=-1),
+        ],
+        execution=fi.Fill.research(0.0), initial_cash=1e8, flows=fi.flows.series("subs.amount"), responses=[("sell", 10.0), "convert"], keep_holdings=True,
+        journal=True, **{"currency": "USD", "fx": "fx.rate"},
+    )
+    run = ws.run(book, rec)
+    led = run.ledger()
+    assert run.failed_at is None and run.max_identity_error < 1e-9, "the redemption met, the identity held"
+    assert min(run.final_cash.values()) >= -1e-6, "no cash below zero in any currency"
+    held = run.holdings().with_columns(pl.col("time").dt.date())
+    end = held.filter(pl.col("time") == dates[-1])
+    final = dict(zip(end["entity"], end["qty"], strict=True))
+    assert final.get("TYU5") == 10.0 and "TYH5" not in final and "TYM5" not in final, "rolled twice: the actual contract, not a generic series"
+    assert final["6EU5"] < 0 and final["BUND"] < held.filter(pl.col("time") == dates[0])["qty"][0], "hedged, and the bond sold down to pay"
+    sold = run.journal().filter((pl.col("kind") == "liquidation") & (pl.col("entity") == "BUND"))
+    assert sold.height >= 1, "the sale that met the redemption"
+    currency = led["currency"].sum()
+    margin = run.journal().filter((pl.col("kind") == "flow") & (pl.col("entity") == "6EU5"))["amount"].sum()
+    assert abs(currency + margin) < 0.5 * abs(currency), "the hedge's margin offsets most of the currency P&L"

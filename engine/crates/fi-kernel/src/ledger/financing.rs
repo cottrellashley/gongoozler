@@ -147,19 +147,44 @@ impl Ledger<'_> {
     }
 
     /// Exchanges base cash for other currencies short of cash for what is due in them.
-    pub(super) fn convert(&mut self, k: usize, t: Ts) {
+    /// Covers what one currency owes with another's cash, at the FX rate and the conversion
+    /// spread (a cost): another currency's shortfall from base cash, then base's own shortfall
+    /// from the other currencies' spare cash (a sale's proceeds abroad paying a redemption at home).
+    pub(super) fn convert(&mut self, k: usize, t: Ts, acc: &mut Acc) {
+        if !self.cfg.conversion.auto {
+            return;
+        }
+        let spread = self.cfg.conversion.spread_bp * 1e-4;
         for s in 1..self.slots.len() {
             let short = self.unmet(k, s) + (-self.st.cash[s].to_f64()).max(0.0);
-            if short > TINY && self.cfg.conversion.auto {
-                let rate = self.st.fx[s] * (1.0 + self.cfg.conversion.spread_bp * 1e-4);
+            if short > TINY {
+                let (x, rate) = (self.st.fx[s], self.st.fx[s] * (1.0 + spread));
                 let base = self.st.cash[0].to_f64().max(0.0) + self.borrowable();
                 let got = short.min(base / rate);
                 if got > 0.0 {
                     self.st.cash[0] -= Cash::from_f64(got * rate);
                     self.st.cash[s] += Cash::from_f64(got);
+                    acc.costs += got * (rate - x);
                     self.log(t, EntryKind::Conversion, self.slots[s], s, got, got * rate, Cause::Book, Some("covering an obligation".into()));
                 }
             }
+        }
+        let mut short = self.unmet(k, 0) + (-(self.st.cash[0].to_f64() + self.borrowable())).max(0.0);
+        for s in 1..self.slots.len() {
+            if short <= TINY {
+                break;
+            }
+            let spare = self.st.cash[s].to_f64() - self.unmet(k, s);
+            if spare <= TINY {
+                continue;
+            }
+            let (x, rate) = (self.st.fx[s], self.st.fx[s] * (1.0 - spread));
+            let sold = spare.min(short / rate);
+            self.st.cash[s] -= Cash::from_f64(sold);
+            self.st.cash[0] += Cash::from_f64(sold * rate);
+            acc.costs += sold * (x - rate);
+            short -= sold * rate;
+            self.log(t, EntryKind::Conversion, self.slots[s], s, -sold, sold * rate, Cause::Book, Some("covering a base obligation".into()));
         }
     }
 
@@ -203,18 +228,31 @@ impl Ledger<'_> {
             .map(|&i| (i, self.value(i, k)))
             .filter(|(_, v)| v.is_finite() && *v > 0.0)
             .collect();
-        let free: Vec<(usize, f64, f64)> =
-            rows.iter().map(|&(i, v)| (i, (self.st.q[i] - self.st.pledged[i].0).max(0.0), v)).filter(|(_, u, _)| *u > TINY).collect();
-        let total: f64 = free.iter().map(|(_, u, v)| u * v * (1.0 - c)).sum();
+        // Every unpledged holding, in any currency, at its value in base (a foreign one at its rate
+        // less the conversion spread: its proceeds come home through `Convert`, which runs next).
+        let spread = if self.cfg.conversion.auto { self.cfg.conversion.spread_bp * 1e-4 } else { 0.0 };
+        let free: Vec<(usize, f64, f64, f64)> = self
+            .st
+            .held
+            .iter()
+            .filter(|&&i| self.st.q[i] > 0.0 && (self.row_slot[i] == 0 || self.cfg.conversion.auto))
+            .map(|&i| (i, (self.st.q[i] - self.st.pledged[i].0).max(0.0), self.value(i, k)))
+            .filter(|(_, u, v)| *u > TINY && v.is_finite() && *v > 0.0)
+            .map(|(i, u, v)| {
+                let s = self.row_slot[i];
+                (i, u, v, if s == 0 { 1.0 } else { self.st.fx[s] * (1.0 - spread) })
+            })
+            .collect();
+        let total: f64 = free.iter().map(|(_, u, v, x)| u * v * (1.0 - c) * x).sum();
         if total > TINY {
             let f = (need / total).min(1.0);
-            for (i, units, v) in free {
-                let sold = units * f;
+            for (i, units, v, _) in free {
+                let (sold, s) = (units * f, self.row_slot[i]);
                 self.st.q[i] -= sold;
-                acc.costs += sold * v * c;
-                self.st.cash[0] += Cash::from_f64(sold * v * (1.0 - c));
+                acc.costs += sold * v * c * self.st.fx[s];
+                self.st.cash[s] += Cash::from_f64(sold * v * (1.0 - c));
                 let e = self.records.entities()[i];
-                self.log(t, EntryKind::Liquidation, e, 0, -sold, sold * v * (1.0 - c), Cause::Book, Some("sold to meet a cash need".into()));
+                self.log(t, EntryKind::Liquidation, e, s, -sold, sold * v * (1.0 - c), Cause::Book, Some("sold to meet a cash need".into()));
             }
             need = self.need(k);
         }

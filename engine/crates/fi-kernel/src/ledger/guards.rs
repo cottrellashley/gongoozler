@@ -9,7 +9,7 @@ impl Ledger<'_> {
     pub(super) fn check_cash(&mut self, k: usize, t: Ts, acc: &mut Acc) -> Result<()> {
         for r in self.cfg.responses.clone() {
             match r {
-                Response::Convert => self.convert(k, t),
+                Response::Convert => self.convert(k, t, acc),
                 Response::Draw => self.draw(k, t),
                 Response::Sell { cost_bp } => self.sell(k, t, cost_bp, acc),
             }

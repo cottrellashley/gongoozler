@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import datetime as dt
 
+import numpy as np
 import polars as pl
 import pytest
 
@@ -282,3 +283,51 @@ def test_coupons_round_as_the_terms_say_and_book_exactly():
     dates = led["time"].dt.date().to_list()
     i = dates.index(d("2024-04-02"))
     assert led["cash"][i] - led["cash"][i - 1] == 1_516_670.0
+
+
+# ---------------------------------------------------------------------------- attribution (M7)
+
+
+def curve_world(days: int = 60):
+    """Two bonds off a flat curve and a spread each: the curve moves for the first 20 days, the
+    spreads for the next 20, nothing for the last 20."""
+    dates = weekdays(d("2025-03-03"), days)
+    k = np.arange(days)
+    level = 0.04 + np.where(k < 20, 0.0002 * k, 0.0002 * 19)
+    spread = 0.01 + np.where(k < 20, 0.0, np.where(k < 40, 0.0001 * (k - 19), 0.0001 * 20))
+    ws = fi.Workspace()
+    ws.series("curve", pl.DataFrame({"curve": "GOV", "date": dates, "z1": level, "z10": level, "z30": level}), entity="curve", kind="curve", time="date",
+              values={"z1": "number", "z10": "number", "z30": "number"}, grid=True)
+    ws.series("spreads", pl.DataFrame({"isin": ["A"] * days + ["B"] * days, "date": dates * 2, "spread": np.r_[spread, spread * 1.5]}),
+              entity="isin", kind="bond", time="date", values={"spread": "number"}, grid=True)
+    bonds = {"A": fi.Bond("2024-01-15", "2034-01-15", 0.045, day_count="30/360", frequency=2),
+             "B": fi.Bond("2024-06-01", "2029-06-01", 0.05, day_count="30/360", frequency=2)}
+    contracts = ws.debt(bonds, fi.valuation.curve("curve", "GOV", {"z1": 1.0, "z10": 10.0, "z30": 30.0}, spread="spreads.spread"))
+    return ws, contracts, fi.Calendar(dates), dates, bonds
+
+
+def test_m7_a_curve_valued_bonds_pnl_splits_into_carry_curve_and_spread():
+    ws, contracts, cal, dates, bonds = curve_world()
+    x = ws.explain(contracts, cal)
+    assert (x["carry"] + x["curve"] + x["spread"] + x["residual"] - x["total"]).abs().max() < 1e-12
+    assert x["residual"].abs().max() < 1e-12, "a curve-valued bond is fully explained"
+    a = x.filter(pl.col("entity") == "A").with_columns(pl.col("time").dt.date())
+    curve_phase, spread_phase, still = a[:18], a[20:38], a[41:]
+    assert spread_phase["curve"].abs().max() < 1e-12 and curve_phase["spread"].abs().max() < 1e-12, "each moves alone"
+    assert (curve_phase["curve"] < 0).all() and (spread_phase["spread"] < 0).all(), "rates and spreads rising lose"
+    assert (still["curve"].abs().max(), still["spread"].abs().max()) < (1e-12, 1e-12) and (still["carry"] > 0).all()
+    # A two-basis-point rise of the curve costs about twice the bond's DV01 (per unit: DV01 / 100).
+    settle, curve = dates[4], fi.Curve(dates[4], [1.0, 10.0, 30.0], [0.04 + 0.0002 * 4] * 3)
+    dv01 = bonds["A"].risk(settle, curve, spread=0.01)["value"] / 100
+    assert a.filter(pl.col("time") == dates[5])["curve"][0] == pytest.approx(-2 * dv01, rel=0.02)
+
+
+def test_m7_a_books_pnl_is_explained_and_adds_up_to_navs_change():
+    ws, contracts, cal, dates, _ = curve_world()
+    rec = ws.records(contracts, cal)
+    run = ws.run(fi.Strategy(hold_then(), schedule="all", execution_lag=0, fill=fi.Fill.research(0.0), keep_holdings=True), rec)
+    att = fi.attribution(run, ws.explain(contracts, cal))
+    parts = att["carry"] + att["curve"] + att["spread"] + att["unexplained"] + att["book"]
+    assert (parts - att["pnl"]).abs().max() < 1e-6
+    assert att["unexplained"].abs().max() < 1e-6 and att["book"].abs().max() < 1e-6, "no cash interest, no costs: all of it is the bond's"
+    assert att["curve"][:20].sum() < 0 < att["carry"].sum()

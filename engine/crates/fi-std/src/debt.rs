@@ -293,6 +293,7 @@ impl Contract for DebtContract {
             defaulted: false,
             done: false,
             pending: false,
+            valued: None,
             mark: f64::NAN,
             mark_ok: Ts::MIN,
             accrued: 0.0,
@@ -370,6 +371,9 @@ struct DebtStepper<'a> {
     done: bool,
     /// Before its issue date: it does not exist yet.
     pending: bool,
+    /// The curve and spread its last price came from (a curve valuation): what the next step's
+    /// P&L is explained against.
+    valued: Option<(Curve, f64)>,
     /// Clean price per 100 of current face.
     mark: f64,
     mark_ok: Ts,
@@ -450,6 +454,7 @@ impl DebtStepper<'_> {
     /// The clean price per 100 of current face on `to`, and the valuation state.
     fn clean_on(&mut self, to: Ts, ctx: &StepCtx<'_>) -> (f64, ValuationState, Ts) {
         let d = date(to);
+        let mut valued = None;
         let observed = |s: &Series, col: usize| s.exact(col, self.c.entity, to, Ts::MAX);
         let (hit, derived) = match &self.price {
             PriceSource::Clean { s, col } => (observed(s, *col), None),
@@ -498,6 +503,8 @@ impl DebtStepper<'_> {
                         };
                         let p = analytics::price_from_curve(self.terms(), d, &curve, spread, fx).ok().map(|p| p.clean);
                         let k = known.max(sk);
+                        drop(projected);
+                        valued = p.map(|_| (curve, spread));
                         (p.map(|v| fi_kernel::Hit { value: v, event: to, known: k }), p)
                     }
                     _ => (None, None),
@@ -513,7 +520,33 @@ impl DebtStepper<'_> {
         if state == ValuationState::Valid {
             self.mark_ok = to;
         }
+        self.valued = if state == ValuationState::Valid { valued } else { None };
         (v, state, hit.map_or(to, |h| h.known))
+    }
+
+    /// The clean price per 100 on `d` from `curve` and `spread`, its floater's unfixed coupons at
+    /// that curve's forwards.
+    fn price_off(&self, d: Date, curve: &Curve, spread: f64) -> Option<f64> {
+        let projected = fi_terms::curve::Projected::for_debt(self.terms(), self.fixings(), curve);
+        let fx: &dyn Fixings = match &projected {
+            Some(p) => p,
+            None => self.fixings(),
+        };
+        analytics::price_from_curve(self.terms(), d, curve, spread, fx).ok().map(|p| p.clean)
+    }
+
+    /// A step's P&L explained (review M7): repriced at `d1` off the old curve unchanged in tenor
+    /// and the old spread (carry, with the accrual, the flows and the roll down the curve), off the
+    /// new curve at the old spread (the curve), and as marked (the spread). They add up to the
+    /// unit's total P&L, `total`, from `value0` with the flows in between.
+    fn explain(&self, d1: Date, before: Option<(Curve, f64)>, value0: f64, value1: f64, total: f64) -> Option<fi_kernel::Explain> {
+        let (c0, s0) = before?;
+        let (c1, _) = self.valued.as_ref()?;
+        let rolled = Curve::new(d1, c0.times.clone(), c0.zeros.clone(), c0.interpolation).ok()?;
+        let v = |clean: f64| clean / 100.0 * self.balance + self.accrued;
+        let (carry, curve) = (v(self.price_off(d1, &rolled, s0)?), v(self.price_off(d1, c1, s0)?));
+        let flows = total - (value1 - value0);
+        Some(fi_kernel::Explain { carry: carry - value0 + flows, curve: curve - carry, spread: value1 - curve })
     }
 
     /// The contractual flows earned or paid in (`d0`, `d1`], and the observed events, in date
@@ -734,6 +767,7 @@ impl Stepper for DebtStepper<'_> {
         let (d0, d1) = (date(from), date(to));
         let (bal0, mark0, ai0) = (self.balance, self.mark, self.accrued);
         let clean0 = mark0 / 100.0 * bal0;
+        let before = self.valued.take();
         let was_defaulted = self.defaulted;
         let m = self.moves(d0, d1, ctx);
         let (mut clean, mut state, known) = if self.done { (mark0, ValuationState::Matured, to) } else { self.clean_on(to, ctx) };
@@ -770,9 +804,15 @@ impl Stepper for DebtStepper<'_> {
             terms.principal += recovered;
             terms.other -= recovered;
         }
-        let _ = was_defaulted;
         let known = known.max(m.known).max(self.fixings.as_ref().map_or(Ts::MIN, |f| f.known.get()));
-        UnitStep { state, known, value: clean1 + ai1, flows, terms, face: self.balance, deferred: m.deferred }
+        // Explained where nothing but the market moved it: no default, call, recovery or
+        // redemption in the step.
+        let explain = if self.done || self.defaulted || was_defaulted || m.retired_face != 0.0 {
+            None
+        } else {
+            self.explain(d1, before, clean0 + ai0, clean1 + ai1, terms.total())
+        };
+        UnitStep { state, known, value: clean1 + ai1, flows, terms, face: self.balance, deferred: m.deferred, explain }
     }
 }
 

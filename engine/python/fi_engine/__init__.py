@@ -97,6 +97,7 @@ __all__ = [
     "Workspace",
     "__version__",
     "asof",
+    "attribution",
     "bonds",
     "cross_section",
     "decision",
@@ -140,6 +141,33 @@ def transition(
     (settling a defaulted claim), ``"exchange"``, ``"income"``, ``"price"`` or ``"fee"``. Orders
     still working in ``from_`` are cancelled; undelivered units follow the new claim."""
     return (at, from_, dict(into or {}), float(cash), role, note)
+
+
+def attribution(run: Run, explained: Any) -> Any:
+    """A book's P&L at each time, explained: each contract's explanation (``Workspace.explain``)
+    weighted by the units the book held over the interval, summed, as ``carry``, ``curve``,
+    ``spread`` and ``unexplained`` (what the contracts' explanations leave), plus ``book``: what
+    the book earned that no holding did (cash interest, financing, costs, currency). The five add
+    up to the change in NAV less capital. The run must have kept its holdings
+    (``keep_holdings=True``)."""
+    import polars as pl
+
+    held = run.holdings()
+    if held.height == 0 and run.trades:
+        raise ValueError("the run kept no holdings: run its book with keep_holdings=True")
+    times = run.ledger()["time"]
+    nxt = pl.DataFrame({"time": times[:-1], "next": times[1:]})
+    # The units held over (t, next] are those held at the end of t.
+    over = held.join(nxt, on="time").select(pl.col("next").alias("time"), "entity", "qty")
+    parts = over.join(explained, on=["entity", "time"], how="left").with_columns(
+        unexplained=pl.when(pl.col("carry").is_null()).then(pl.col("total")).otherwise(pl.col("residual")),
+    )
+    weighted = parts.group_by("time").agg(
+        [(pl.col("qty") * pl.col(c).fill_null(0.0)).sum().alias(c) for c in ("carry", "curve", "spread", "unexplained", "total")]
+    )
+    led = run.ledger().select("time", (pl.col("nav").diff().fill_null(0.0) - pl.col("capital")).alias("pnl"))
+    out = led.join(weighted, on="time", how="left").fill_null(0.0)
+    return out.with_columns(book=pl.col("pnl") - pl.col("total")).drop("total").sort("time")
 
 
 def ref(kind: str) -> tuple[str, str]:

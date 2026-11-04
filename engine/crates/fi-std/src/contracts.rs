@@ -83,7 +83,7 @@ impl Stepper for Level<'_> {
         }
         self.last = v1;
         let terms = Terms::from_parts((0.0, 0.0), (0.0, 0.0), (v0, v1), 0.0, &Flows::default());
-        UnitStep { state, known: hit.map_or(to, |h| h.known), value: v1, flows: Flows::default(), terms, face: f64::NAN, deferred: None }
+        UnitStep { state, known: hit.map_or(to, |h| h.known), value: v1, flows: Flows::default(), terms, face: f64::NAN, deferred: None, explain: None }
     }
 }
 
@@ -327,7 +327,7 @@ impl Stepper for Bond<'_> {
             self.balance = 0.0;
             state = ValuationState::Matured;
         }
-        UnitStep { state, known, value: self.value(), flows, terms, face: self.balance, deferred: None }
+        UnitStep { state, known, value: self.value(), flows, terms, face: self.balance, deferred: None, explain: None }
     }
 }
 
@@ -409,7 +409,16 @@ impl Stepper for CashStep<'_> {
         let mut flows = Flows::default();
         flows.add_cash(Role::Income, interest);
         let terms = Terms::from_parts((0.0, 0.0), (0.0, 0.0), (1.0, 1.0), 0.0, &flows);
-        UnitStep { state: ValuationState::Valid, known: hit.map_or(to, |h| h.known.max(to)), value: 1.0, flows, terms, face: f64::NAN, deferred: None }
+        UnitStep {
+            state: ValuationState::Valid,
+            known: hit.map_or(to, |h| h.known.max(to)),
+            value: 1.0,
+            flows,
+            terms,
+            face: f64::NAN,
+            deferred: None,
+            explain: None,
+        }
     }
 }
 
@@ -481,6 +490,6 @@ impl Stepper for Future<'_> {
         // The level's price term is F₁ − F₀: settled in cash as variation margin.
         flows.add_cash(Role::Performance, s.terms.price * self.multiplier);
         let terms = Terms::from_parts((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), 0.0, &flows);
-        UnitStep { state: s.state, known: s.known, value: 0.0, flows, terms, face: f64::NAN, deferred: None }
+        UnitStep { state: s.state, known: s.known, value: 0.0, flows, terms, face: f64::NAN, deferred: None, explain: None }
     }
 }

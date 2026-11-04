@@ -38,7 +38,7 @@ pub mod workspace;
 
 pub use cash::{Cash, Rounding, RoundingMode};
 pub use composite::Composite;
-pub use contract::{Contract, Deferred, Flows, InCurrency, Role, StepCtx, Stepper, Terms, UnitStep, ValuationState};
+pub use contract::{Contract, Deferred, Explain, Flows, InCurrency, Role, StepCtx, Stepper, Terms, UnitStep, ValuationState};
 pub use entity::{Entities, EntityId};
 pub use fi_terms::DayCount;
 pub use fill::{Fill, FillModel, Order, ResearchFill};
@@ -53,7 +53,7 @@ pub use measure::{Face, FromSeries, Measure, Value};
 pub use model::{BatchModel, CrossSectionModel, Input, Model, ModelSpec, Shape, TimeSeriesModel, Vintaged};
 pub use policy::{Diagnostics, HoldingPolicy, Information, KnowledgePolicy, MissingPolicy, Outcomes};
 pub use progress::{Progress, Reporter};
-pub use records::UnitRecords;
+pub use records::{Explained, UnitRecords};
 pub use series::{Column, Hit, Intervention, KnowledgeBasis, Layout, ModelRole, Producer, Provenance, Series, Unit, Vintage};
 pub use time::{Calendar, Ts};
 pub use transition::Transition;

@@ -147,6 +147,19 @@ pub struct Deferred {
     pub income: f64,
 }
 
+/// A unit's P&L over an interval, explained by what moved its value (review M7): carry (time
+/// passing with the market standing still in tenor: accrual and roll-down), the curve's move,
+/// and the spread's. They add up to the unit's total P&L.
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub struct Explain {
+    /// Time passing, with the curve and spread unchanged in tenor.
+    pub carry: f64,
+    /// The curve's move, at the old spread.
+    pub curve: f64,
+    /// The spread's move.
+    pub spread: f64,
+}
+
 /// One unit over one interval.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct UnitStep {
@@ -166,11 +179,22 @@ pub struct UnitStep {
     /// Cash entitled in the interval that pays later. Its P&L is in `terms` with the rest; its
     /// cash is not in `flows`.
     pub deferred: Option<Deferred>,
+    /// The P&L explained, where the contract can (a debt valued off a curve).
+    pub explain: Option<Explain>,
 }
 
 impl Default for UnitStep {
     fn default() -> Self {
-        Self { state: ValuationState::default(), known: Ts::MIN, value: 0.0, flows: Flows::default(), terms: Terms::default(), face: f64::NAN, deferred: None }
+        Self {
+            state: ValuationState::default(),
+            known: Ts::MIN,
+            value: 0.0,
+            flows: Flows::default(),
+            terms: Terms::default(),
+            face: f64::NAN,
+            deferred: None,
+            explain: None,
+        }
     }
 }
 

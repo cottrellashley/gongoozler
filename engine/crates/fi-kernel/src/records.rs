@@ -22,6 +22,68 @@ use crate::{
     workspace::Workspace,
 };
 
+/// Contracts' P&L explained step by step (review M7): for each contract and time (entity-major,
+/// as the records), its total P&L and, where it explains itself, its carry, curve and spread
+/// (NaN where it does not).
+#[derive(Clone, Debug)]
+pub struct Explained {
+    /// The contracts, in row order.
+    pub entities: Vec<EntityId>,
+    /// Calendar length.
+    pub t: usize,
+    /// Total P&L per unit over the interval ending at each time.
+    pub total: Vec<f64>,
+    /// Carry: time passing with the market unchanged in tenor.
+    pub carry: Vec<f64>,
+    /// The curve's move.
+    pub curve: Vec<f64>,
+    /// The spread's move.
+    pub spread: Vec<f64>,
+}
+
+impl Explained {
+    /// Steps `contracts` over `cal` again, keeping each step's explanation; nothing is stored in
+    /// the records, which stay as lean as a run needs.
+    ///
+    /// # Errors
+    /// As [`UnitRecords::compute`].
+    pub fn compute(contracts: &[Arc<dyn Contract>], ws: &Workspace, cal: &Calendar, missing: MissingPolicy) -> Result<Self> {
+        if cal.is_empty() {
+            return Err(Error::Invalid("an explanation needs a non-empty calendar".into()));
+        }
+        let steppers = contracts.iter().map(|c| c.bind(ws)).collect::<Result<Vec<_>>>()?;
+        let (t, n) = (cal.len(), contracts.len());
+        let times = cal.times();
+        let diagnostics = Diagnostics::default();
+        let broken = std::sync::Mutex::new(None);
+        let mut out = Self {
+            entities: contracts.iter().map(|c| c.entity()).collect(),
+            t,
+            total: vec![0.0; n * t],
+            carry: vec![f64::NAN; n * t],
+            curve: vec![f64::NAN; n * t],
+            spread: vec![f64::NAN; n * t],
+        };
+        (out.total.par_chunks_mut(t), out.carry.par_chunks_mut(t), out.curve.par_chunks_mut(t), out.spread.par_chunks_mut(t), steppers.into_par_iter())
+            .into_par_iter()
+            .for_each(|(tot, ca, cu, sp, mut stepper)| {
+                let ctx = StepCtx { missing, diagnostics: &diagnostics, broken: &broken };
+                let _ = stepper.init(times[0], &ctx);
+                for k in 1..t {
+                    let s = stepper.step(times[k - 1], times[k], &ctx);
+                    tot[k] = s.terms.total();
+                    if let Some(e) = s.explain {
+                        (ca[k], cu[k], sp[k]) = (e.carry, e.curve, e.spread);
+                    }
+                }
+            });
+        if let Some(m) = broken.into_inner().ok().flatten() {
+            return Err(Error::Invalid(m));
+        }
+        Ok(out)
+    }
+}
+
 /// Unit records for a set of contracts over a calendar.
 #[derive(Clone, Debug)]
 pub struct UnitRecords {

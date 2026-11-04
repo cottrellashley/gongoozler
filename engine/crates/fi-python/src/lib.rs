@@ -1751,6 +1751,20 @@ impl PyWorkspace {
         Ok(PyRecords { rec: Arc::new(rec), names, diagnostics: d.snapshot(), reads: Arc::new(reads), approximations: Arc::new(approximations) })
     }
 
+    /// Each contract's P&L per unit explained at each time (review M7): `total`, and where the
+    /// contract explains itself (a debt valued off a curve), `carry` (the accrual, the flows and
+    /// the roll down the curve, with the market unchanged in tenor), `curve` and `spread`, which
+    /// add up to it; `residual` is what they leave (all of it where nothing explains it). Steps
+    /// the contracts again; nothing is kept in the records. `fi.attribution` weights it by a run's
+    /// holdings.
+    #[pyo3(signature = (contracts, calendar, missing = None))]
+    fn explain<'py>(&self, py: Python<'py>, contracts: &PyContracts, calendar: &PyCalendar, missing: Option<&Bound<'_, PyAny>>) -> PyResult<Bound<'py, PyAny>> {
+        let policy = parse_missing(missing)?;
+        let (ws, c, cal) = (&self.ws, &contracts.inner, &calendar.cal);
+        let x = py.detach(|| fi_kernel::Explained::compute(c, ws, cal, policy)).map_err(to_py)?;
+        convert::to_python(py, fi_io::explained_frame(&x, cal, &self.ws.entities).map_err(convert::err)?)
+    }
+
     /// The records plus a composite: a portfolio of `legs` held as one contract. `schedule` lists
     /// `(time, value weights)`; the first must be at or before the calendar's first time; later
     /// entries are rolls, each costing `roll_cost_bp` of the value traded.

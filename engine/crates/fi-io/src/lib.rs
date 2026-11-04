@@ -556,3 +556,32 @@ pub fn series_frame(s: &KSeries, entities: &Entities) -> PolarsResult<DataFrame>
     }
     DataFrame::new_infer_height(cols)
 }
+
+/// Contracts' P&L explained (review M7) as a frame: one row per contract and time after the
+/// first, with `total`, `carry`, `curve`, `spread` (null where the contract does not explain
+/// itself) and `residual`.
+///
+/// # Errors
+/// From Polars.
+pub fn explained_frame(x: &fi_kernel::Explained, cal: &fi_kernel::Calendar, entities: &Entities) -> PolarsResult<DataFrame> {
+    let t = x.t;
+    let rows: Vec<usize> = (0..x.entities.len()).flat_map(|i| (1..t).map(move |k| i * t + k)).collect();
+    let pick = |v: &[f64]| -> Vec<Option<f64>> { rows.iter().map(|&r| v[r].is_finite().then_some(v[r])).collect() };
+    let residual: Vec<f64> = rows
+        .iter()
+        .map(|&r| {
+            let parts = x.carry[r] + x.curve[r] + x.spread[r];
+            if parts.is_finite() { x.total[r] - parts } else { x.total[r] }
+        })
+        .collect();
+    let times = cal.times();
+    DataFrame::new_infer_height(vec![
+        Series::new("entity".into(), rows.iter().map(|&r| entities.name(x.entities[r / t]).to_owned()).collect::<Vec<String>>()).into_column(),
+        datetime("time", rows.iter().map(|&r| times[r % t].0))?.into_column(),
+        Series::new("total".into(), rows.iter().map(|&r| x.total[r]).collect::<Vec<f64>>()).into_column(),
+        Series::new("carry".into(), pick(&x.carry)).into_column(),
+        Series::new("curve".into(), pick(&x.curve)).into_column(),
+        Series::new("spread".into(), pick(&x.spread)).into_column(),
+        Series::new("residual".into(), residual).into_column(),
+    ])
+}

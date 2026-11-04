@@ -111,6 +111,12 @@ type per product.
   continuous), yield and Z-spread solvers, durations and convexity, and sensitivities by
   central difference to a declared bump (parallel, key rate, spread), each returned with the
   definition of what it measured.
+- **Attribution** (`Explained`, `ws.explain`, `fi.attribution`): a step of a debt valued off a curve
+  is repriced off the old curve unchanged in tenor and the old spread (carry: the accrual, the
+  flows and the roll down the curve), off the new curve at the old spread (the curve), and as
+  marked (the spread); they add up to its total P&L. A book's attribution weights each contract's
+  by the units held over the interval, and names what no holding earned (cash interest,
+  financing, costs, currency). A step with a credit event or a repayment is left unexplained.
 - **Supplied histories.** A bond whose marks and flows are supplied (`SuppliedBond`) checks that
   its accrued interest falls back when a coupon pays, so a coupon is never counted twice.
 

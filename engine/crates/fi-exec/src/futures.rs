@@ -181,7 +181,7 @@ impl Stepper for FutureStep<'_> {
         } else {
             state
         };
-        UnitStep { state, known, value: 0.0, flows, terms, face: f64::NAN, deferred: None }
+        UnitStep { state, known, value: 0.0, flows, terms, face: f64::NAN, deferred: None, explain: None }
     }
 }
 

@@ -285,3 +285,19 @@ def test_m3_cash_in_each_currency_earns_its_own_rate_in_its_own_day_count():
     with pytest.raises(fi.InvalidError, match="no contract of the book"):
         ws.currency("JPY")
         ws.run(fi.Strategy(into_eur_and_out, deposit_rate={"JPY": "estr.rate"}, **USD), rec)
+
+
+def test_m4_the_money_weighted_return_is_the_rate_that_prices_the_investors_flows():
+    """Review M4: beside the time-weighted return, what the investors earned given their flows."""
+    ws, rec, dates = world(days=60)
+    years = [(d - dates[0]).days / 365 for d in dates]
+    plain = ws.run(fi.Strategy(once({"A": 0.5}), schedule="all", execution_lag=0, **USD), rec)
+    nav = plain.ledger()["nav"].to_list()
+    assert plain.report()["money_weighted"] == pytest.approx((nav[-1] / nav[0]) ** (1 / years[-1]) - 1, rel=1e-9), "no flows: NAV's growth"
+    ws.series("subs", pl.DataFrame({"date": [dates[20], dates[40]], "amount": [5e7, -3e7]}), time="date", values={"amount": "number"})
+    run = ws.run(fi.Strategy(once({"A": 0.5}), schedule="all", execution_lag=0, flows=fi.flows.series("subs.amount"), **USD), rec)
+    led = run.ledger()
+    r = run.report()["money_weighted"]
+    nav, cap, costs = led["nav"].to_list(), led["capital"].to_list(), led["costs"].to_list()
+    flows = [(0.0, -(nav[0] - cap[0] + costs[0]))] + [(years[k], -c) for k, c in enumerate(cap) if c] + [(years[-1], nav[-1])]
+    assert abs(sum(f * (1 + r) ** -t for t, f in flows)) < 1e-3, "the investors' flows are worth nothing at it"

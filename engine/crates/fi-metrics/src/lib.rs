@@ -51,6 +51,58 @@ pub struct Report {
     pub financing: f64,
     /// Trading costs over the run.
     pub costs: f64,
+    /// The money-weighted return, a year: what the investors earned given when they added and
+    /// took money. The time-weighted return (`cagr`) answers what the strategy earned, whatever
+    /// the flows: the two differ exactly when flows came before good or bad periods.
+    pub money_weighted: f64,
+}
+
+/// The money-weighted return (review M4): the rate a year, over ACT/365F years from the first
+/// time, at which the investors' flows are worth nothing together: the opening NAV in, each
+/// subscription in, each redemption and distribution out, the closing NAV out. NaN when no rate
+/// from −99% to 1,000% a year solves it, or the book has no value to start with.
+#[must_use]
+pub fn money_weighted(out: &LedgerOutput) -> f64 {
+    let n = out.nav.len();
+    if n < 2 {
+        return f64::NAN;
+    }
+    let at = |k: usize| -> f64 { out.capital.get(k).copied().unwrap_or(0.0) };
+    let costs0 = out.costs.first().copied().unwrap_or(0.0);
+    // The opening value (before the first step's trades and flows) in, each step's net capital
+    // in, the closing NAV out.
+    let mut flows: Vec<(f64, f64)> = vec![(0.0, -(out.nav[0] - at(0) + costs0))];
+    let t0 = out.times[0].0 as f64;
+    let years = |k: usize| (out.times[k].0 as f64 - t0) / (365.0 * 86_400e9);
+    for k in 0..n {
+        if at(k) != 0.0 {
+            flows.push((years(k), -at(k)));
+        }
+    }
+    flows.push((years(n - 1), out.nav[n - 1]));
+    if flows[0].1.is_nan() || flows[0].1 >= 0.0 || flows.iter().any(|(_, f)| !f.is_finite()) {
+        return f64::NAN;
+    }
+    let pv = |r: f64| flows.iter().map(|(t, f)| f * (1.0 + r).powf(-t)).sum::<f64>();
+    let (mut lo, mut hi) = (-0.99, 10.0);
+    let (mut flo, fhi) = (pv(lo), pv(hi));
+    if flo.is_nan() || fhi.is_nan() || flo.signum() == fhi.signum() {
+        return f64::NAN;
+    }
+    for _ in 0..200 {
+        let mid = 0.5 * (lo + hi);
+        let fm = pv(mid);
+        if fm == 0.0 || hi - lo < 1e-14 {
+            return mid;
+        }
+        if fm.signum() == flo.signum() {
+            lo = mid;
+            flo = fm;
+        } else {
+            hi = mid;
+        }
+    }
+    0.5 * (lo + hi)
 }
 
 /// The run's daily returns, keyed by time, as Nautilus's statistics take them.
@@ -85,6 +137,7 @@ pub fn report(out: &LedgerOutput, benchmark: Option<&LedgerOutput>, period: usiz
         other: sum(&out.other),
         financing: sum(&out.financing),
         costs: sum(&out.costs),
+        money_weighted: money_weighted(out),
     }
 }
 
@@ -110,6 +163,23 @@ mod tests {
         let sd = (rets.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (n - 1.0)).sqrt();
         assert!((rep.sharpe - mean / sd * 252f64.sqrt()).abs() < 1e-9, "{} vs {}", rep.sharpe, mean / sd * 252f64.sqrt());
         assert!(rep.max_drawdown <= 0.0 && rep.volatility > 0.0);
+    }
+
+    #[test]
+    fn the_money_weighted_return_weighs_the_flows() {
+        // A year at +10% with no flows: 10% a year.
+        let mut l = ledger(&[0.10]);
+        l.times = vec![Ts::from_days(19_000), Ts::from_days(19_365)];
+        l.capital = vec![0.0, 0.0];
+        assert!((money_weighted(&l) - 0.10).abs() < 1e-12);
+        // Half a year at +10%, then 100 more invested, then half a year at −10%: the investors put
+        // more in before the fall, so they earned less than the strategy did.
+        let times = vec![Ts::from_days(19_000), Ts::from_days(19_000 + 182), Ts::from_days(19_365)];
+        let (n1, n2) = (110.0 + 100.0, (110.0 + 100.0) * 0.9);
+        let out = LedgerOutput { times, nav: vec![100.0, n1, n2], capital: vec![0.0, 100.0, 0.0], ..LedgerOutput::default() };
+        let r = money_weighted(&out);
+        let pv = -100.0 - 100.0 * (1.0 + r).powf(-182.0 / 365.0) + n2 * (1.0 + r).powf(-1.0);
+        assert!(pv.abs() < 1e-8 && r < -0.01, "{r}: invested before the fall");
     }
 
     #[test]

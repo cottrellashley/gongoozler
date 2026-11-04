@@ -1077,6 +1077,7 @@ impl PyRun {
             ("other", Some(r.other)),
             ("financing", Some(r.financing)),
             ("costs", Some(r.costs)),
+            ("money_weighted", Some(r.money_weighted)),
         ] {
             d.set_item(k, v)?;
         }

@@ -128,6 +128,23 @@ contracts = ws.debt(bonds, fi.valuation.curve("curves", "UST", {"z1": 1, "z5": 5
 records = ws.records(contracts, cal, transitions=[fi.transition("2025-04-01", "OLD", {"NEW": 0.5}, cash=0.02)])
 ```
 
+**Derivatives, execution, decisions and attribution:**
+
+```python
+ty = ws.future("TYM5", "futures.settle", expiration="2025-06-18", multiplier=1000, price_increment="0.015625")  # a Nautilus FuturesContract
+roll = fi.Decision.roll([("TYM5", "2025-06-18"), ("TYU5", "2025-09-19")], 10, days_before=5)
+irs = ws.swap("IRS5Y", fixed_leg, floating_leg, fi.valuation.curve("curves", "SOFR", tenors), fixings="fixings.rate")
+cdx = ws.cds("CDX", "cdx.price", coupon=0.01, start="2025-03-20", maturity="2030-06-20", names=weights, events="credit")
+opt = fi.Decision.optimise("signals.alpha", risk="signals.vol", risk_aversion=10, bounds=(0, 0.05),
+                           exposures={"risk.duration": (5.5, 6.5)}, groups=("static.sector", 0.25))   # status and binding constraints journalled
+fill = fi.Fill.auction(bidders=5, participation=0.7, reserve_bp=30)  # or fi.Fill.primary({"NEW": (99.5, 0.4)}), fi.Fill.rfq(...)
+book = fi.Strategy(opt, fill=fill, cash=fi.cash.borrow(limit=1e7, rate="sofr.rate"), currency=fi.base_currency("USD", fx="fx.rate"),
+                   keep_holdings=True)
+run = ws.run(book, records)
+fi.attribution(run, ws.explain(contracts, cal))     # carry, curve, spread, unexplained, book
+run.report()["money_weighted"]                      # beside the time-weighted statistics
+```
+
 **Data, models and strategies:**
 
 ```python

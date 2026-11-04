@@ -135,6 +135,16 @@ identity.
 
 Tests: `python/tests/test_futures.py` (the brief's R4).
 
+## The optimiser
+
+`fi_std::Optimise` (`fi.Decision.optimise`) is a decision: at each, the weights that maximise
+expected return less a risk penalty and a turnover penalty, under weight bounds, the budget,
+exposure bands in any per-contract measure and group caps, solved by ADMM (as OSQP) with the few
+dense constraint rows taken by the Woodbury identity. The solver's status and the constraints
+that bind are journalled with the decision; an infeasible mandate keeps the book (and says so) or
+stops the run, as declared: nothing is relaxed. Tests: its own against the water-filling closed
+form, and `python/tests/test_optimise.py` (every constraint holds in the book traded to).
+
 ## The ledger's step
 
 Each step, at time t:

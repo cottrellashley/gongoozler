@@ -471,3 +471,114 @@ mod tests {
         assert_eq!(silent.fill(&order(1.0), 1.0).qty, 0.0);
     }
 }
+
+/// A bid list, as a BWIC auctions one (review M5): each order is a line auctioned whole to
+/// `bidders`, each bidding with probability `participation` at the unit's value less a discount
+/// (for a sale; plus it, for a purchase) drawn between `discount_bp` and `discount_bp +
+/// dispersion_bp`. The best bid trades the whole line if it clears the reserve (`reserve_bp`, the
+/// most the book gives up); otherwise the line does not trade, and nothing fills. Draws are keyed
+/// by the seed, the line and the time, so the same list gives the same outcome.
+#[derive(Clone, Debug)]
+pub struct AuctionFill {
+    /// Bidders asked.
+    pub bidders: usize,
+    /// Each bidder's chance of bidding.
+    pub participation: f64,
+    /// The least discount a bid carries, in basis points of the unit's value.
+    pub discount_bp: f64,
+    /// The spread of bids beyond it, in basis points.
+    pub dispersion_bp: f64,
+    /// The most the book gives up below its value (above, for a purchase); infinite: no reserve.
+    pub reserve_bp: f64,
+    /// Seed.
+    pub seed: u64,
+}
+
+impl FillModel for AuctionFill {
+    fn name(&self) -> String {
+        format!(
+            "auction(bidders={}, participation={}, discount_bp={}, dispersion_bp={}, reserve_bp={})",
+            self.bidders, self.participation, self.discount_bp, self.dispersion_bp, self.reserve_bp
+        )
+    }
+
+    fn fill(&self, order: &Order, value: f64) -> Fill {
+        let buy = order.qty > 0.0;
+        let mut best: Option<f64> = None;
+        for b in 0..self.bidders {
+            let mut h = Hash64::new();
+            h.str("auction");
+            h.u64(self.seed);
+            h.u64(u64::from(order.entity.0));
+            h.i64(order.t.0);
+            h.u64(b as u64);
+            let r = h.finish();
+            if unit(r) > self.participation {
+                continue;
+            }
+            let mut h2 = Hash64::new();
+            h2.u64(r);
+            let bp = self.discount_bp + self.dispersion_bp * unit(h2.finish());
+            best = Some(best.map_or(bp, |x: f64| x.min(bp)));
+        }
+        match best {
+            Some(bp) if bp <= self.reserve_bp => {
+                let price = value + if buy { 1.0 } else { -1.0 } * value.abs() * bp * 1e-4;
+                Fill::new(order.qty, price)
+            }
+            _ => Fill::new(0.0, value),
+        }
+    }
+}
+
+/// Primary allocation (review M5): an order to buy a new issue is allocated a fraction of its
+/// size at the issue's reoffer price (per 100 of face, a new issue carrying no accrued interest);
+/// every other order fills through `otherwise`.
+pub struct PrimaryFill {
+    /// The new issues: (contract, reoffer per 100, fraction allocated).
+    pub issues: Vec<(EntityId, f64, f64)>,
+    /// How every other order fills.
+    pub otherwise: Arc<dyn FillModel>,
+}
+
+impl FillModel for PrimaryFill {
+    fn name(&self) -> String {
+        let issues: Vec<String> = self.issues.iter().map(|(e, p, a)| format!("{}@{p}x{a}", e.0)).collect();
+        format!("primary({}; otherwise {})", issues.join(","), self.otherwise.name())
+    }
+
+    fn fill(&self, order: &Order, value: f64) -> Fill {
+        match self.issues.iter().find(|(e, _, _)| *e == order.entity) {
+            Some((_, reoffer, allocation)) if order.qty > 0.0 => Fill::new(order.qty * allocation.clamp(0.0, 1.0), reoffer / 100.0),
+            _ => self.otherwise.fill(order, value),
+        }
+    }
+}
+
+#[cfg(test)]
+mod auction_tests {
+    use super::*;
+
+    #[test]
+    fn a_bid_list_trades_lines_whole_or_not_at_all_and_never_below_its_reserve() {
+        let a = AuctionFill { bidders: 4, participation: 0.6, discount_bp: 20.0, dispersion_bp: 30.0, reserve_bp: 35.0, seed: 9 };
+        let (mut traded, mut dnt) = (0, 0);
+        for k in 0..400 {
+            let o = Order { entity: EntityId(k % 50), qty: -1_000_000.0, t: Ts::from_days(i64::from(k)) };
+            let f = a.fill(&o, 0.98);
+            if f.qty == 0.0 {
+                dnt += 1;
+            } else {
+                traded += 1;
+                assert_eq!(f.qty, o.qty, "a line trades whole");
+                let bp = (0.98 - f.price) / 0.98 * 1e4;
+                assert!((20.0 - 1e-9..=35.0 + 1e-9).contains(&bp), "{bp}bp");
+            }
+            assert_eq!(a.fill(&o, 0.98), f, "the same list, the same outcome");
+        }
+        assert!(traded > 100 && dnt > 50, "{traded} traded, {dnt} did not");
+        let p = PrimaryFill { issues: vec![(EntityId(1), 99.5, 0.4)], otherwise: Arc::new(a) };
+        let f = p.fill(&Order { entity: EntityId(1), qty: 1_000.0, t: Ts::from_days(1) }, f64::NAN);
+        assert_eq!((f.qty, f.price), (400.0, 0.995));
+    }
+}

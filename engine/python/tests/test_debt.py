@@ -331,3 +331,51 @@ def test_m7_a_books_pnl_is_explained_and_adds_up_to_navs_change():
     assert (parts - att["pnl"]).abs().max() < 1e-6
     assert att["unexplained"].abs().max() < 1e-6 and att["book"].abs().max() < 1e-6, "no cash interest, no costs: all of it is the bond's"
     assert att["curve"][:20].sum() < 0 < att["carry"].sum()
+
+
+# ------------------------------------------------------------------------- auctions and primary (M5)
+
+
+def test_m5_a_bid_list_sells_some_lines_whole_and_the_rest_do_not_trade():
+    bonds = {f"L{i:02d}": fi.Bond("2024-01-15", "2030-01-15", 0.05, day_count="30/360", frequency=2) for i in range(20)}
+    dates = weekdays(d("2025-02-03"), 10)
+    marks = pl.DataFrame({"isin": [n for n in bonds for _ in dates], "date": dates * len(bonds), "clean": 98.0})
+    ws = fi.Workspace()
+    ws.series("marks", marks, entity="isin", kind="bond", time="date", values={"clean": "price"}, grid=True)
+    rec = ws.records(ws.debt(bonds, fi.valuation.clean("marks.clean")), ws.calendar("marks"))
+    names = sorted(bonds)
+
+    @fi.decision
+    def list_them(ctx):
+        return {n: 0.0 for n in names} if ctx.k == 3 else None
+
+    # The book holds every line, and puts them all on one list.
+    auction = fi.Fill.auction(bidders=3, participation=0.5, discount_bp=10, dispersion_bp=40, reserve_bp=30, seed=4)
+    book = fi.Book([fi.Policy(list_them, schedule="all", lag=0)], execution=auction, initial_cash=0.0, opening=[(n, 5e6) for n in names],
+                   time_in_force=1, journal=True)
+    run = ws.run(book, rec)
+    sold = run.journal().filter((pl.col("kind") == "fill") & (pl.col("qty") < 0))
+    left = run.final_holdings
+    assert 0 < sold.height < 20 and len(left) == 20 - sold.height, "lines trade whole or not at all"
+    values = rec.frame().select("entity", "time", "value")
+    for row in sold.join(values, on=["entity", "time"]).iter_rows(named=True):
+        price, v = -row["amount"] / row["qty"], row["value"]  # a unit's value is dirty: clean plus accrued
+        assert v * (1 - 30e-4) - 1e-12 <= price <= v * (1 - 10e-4) + 1e-12, "within the reserve"
+
+
+def test_m5_a_new_issue_is_allocated_its_fraction_at_the_reoffer():
+    new = fi.Bond("2025-02-10", "2030-02-10", 0.05, day_count="30/360", frequency=2)
+    dates = weekdays(d("2025-02-03"), 15)
+    marks = pl.DataFrame({"isin": ["NEW"] * 10, "date": dates[5:], "clean": 100.25})
+    ws = fi.Workspace()
+    ws.series("marks", marks, entity="isin", kind="bond", time="date", values={"clean": "price"})
+    rec = ws.records(ws.debt({"NEW": new}, fi.valuation.clean("marks.clean")), fi.Calendar(dates))
+
+    @fi.decision
+    def bid(ctx):
+        return fi.orders({"NEW": 1e8}) if ctx.t == rec.calendar.times()[5] else None
+
+    run = ws.run(fi.Book([fi.Policy(bid, schedule="all", lag=0)], execution=fi.Fill.primary({"NEW": (99.5, 0.4)}), initial_cash=1e8), rec)
+    assert run.final_holdings["NEW"] == pytest.approx(4e7)
+    assert run.final_cash[next(iter(run.final_cash))] == pytest.approx(1e8 - 4e7 * 0.995, rel=1e-12), "paid the reoffer"
+    assert run.max_identity_error < 1e-9

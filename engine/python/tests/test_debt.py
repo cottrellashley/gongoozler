@@ -379,3 +379,23 @@ def test_m5_a_new_issue_is_allocated_its_fraction_at_the_reoffer():
     assert run.final_holdings["NEW"] == pytest.approx(4e7)
     assert run.final_cash[next(iter(run.final_cash))] == pytest.approx(1e8 - 4e7 * 0.995, rel=1e-12), "paid the reoffer"
     assert run.max_identity_error < 1e-9
+
+
+def test_a_static_scenario_reprices_the_book_off_a_stressed_curve():
+    """Review C3 (phase D): the same book on the curve shifted 100bp, declared as a scenario,
+    loses what the terms' own pricing says, and the run knows it is a scenario."""
+    dates = weekdays(d("2025-03-03"), 5)
+    bond = fi.Bond("2024-01-15", "2034-01-15", 0.045, day_count="30/360", frequency=2)
+    tenors = {"z1": 1.0, "z10": 10.0, "z30": 30.0}
+    base = pl.DataFrame({"curve": "GOV", "date": dates, **dict.fromkeys(tenors, 0.04)})
+    navs, modes = {}, {}
+    for name, frame, scenario in (("base", base, None), ("stress", base.with_columns([pl.col(c) + 0.01 for c in tenors]), "parallel +100bp")):
+        ws = fi.Workspace()
+        ws.series("curve", frame, entity="curve", kind="curve", time="date", values=dict.fromkeys(tenors, "number"), grid=True, scenario=scenario)
+        rec = ws.records(ws.debt({"B": bond}, fi.valuation.curve("curve", "GOV", tenors, spread=0.01)), fi.Calendar(dates))
+        hold = fi.Decision.python(lambda ctx: fi.quantities({"B": 1e6}) if ctx.k == 0 else None)
+        run = ws.run(fi.Strategy(hold, schedule="all", execution_lag=0), rec)
+        navs[name], modes[name] = run.ledger()["nav"][-1] - run.ledger()["cash"][-1], run.mode
+    p = {c: bond.price(dates[-1], curve=fi.Curve(dates[-1], list(tenors.values()), [z] * 3), spread=0.01)["dirty"] for c, z in (("base", 0.04), ("stress", 0.05))}
+    assert navs["stress"] - navs["base"] == pytest.approx(1e6 * (p["stress"] - p["base"]) / 100, rel=1e-9)
+    assert modes == {"base": "policy backtest", "stress": "scenario"}

@@ -7,7 +7,7 @@
 # [tool.uv]
 # exclude-newer = "2026-11-01T00:00:00Z"
 # [tool.gongoozler]
-# memory = "2GiB"
+# memory = "4GiB"                  # the run needs well under 1 GiB; the first after a change to the engine builds it
 # sweep = { top = [10, 20, 40] }
 # ///
 """A fixed income backtest in the engine built into gongoozler: bonds defined by their terms,
@@ -22,6 +22,9 @@ the terms.
     gongoozler run examples/fi_bonds.py                  # watched by the CLI; its results kept
     gongoozler run --param top=40 examples/fi_bonds.py   # a parameter set from outside
     gongoozler sweep examples/fi_bonds.py --rank run.total_return
+
+The engine is a path source here (`../engine`): the first run after a change to its Rust builds it,
+which takes minutes; every later run starts at once.
 """
 
 import numpy as np

@@ -18,6 +18,9 @@ https://docs.astral.sh/uv/guides/scripts/.
 | `UV_FIND_LINKS=DIR` resolves a name from wheels in a directory: a box resolves `gongoozler` from the wheel in its image (`uv build --wheel`) | Read |
 | **Under `PYTHONUNBUFFERED=1`, each `print` is two writes** (the text, then the newline). Reconfigured to line buffering (`sys.stdout.reconfigure(line_buffering=True, write_through=False)`), it is one, still shown as printed: a chatty run went from 1.53× to 0.94× its bare time under the CLI | Observed (`kb/measurements.md`) |
 | uv resolves for every Python a project allows: a dependency needing 3.13+ must carry `; python_version >= '3.13'` when the project allows 3.12 | Observed |
+| A maturin project as a path source (`fi-engine = { path = "../engine", editable = true }`) builds through maturin's PEP 517 hooks in release, reusing the engine's own `target/`; its `[tool.uv] cache-keys` (here globs over `crates/**/*.rs` and the manifests) decide when uv rebuilds it | Observed: `uv sync` in 18 s on a warm `target/`; records at release speed | `python/pyproject.toml`, `engine/pyproject.toml` |
+| An editable maturin install puts the extension in the source tree (`engine/python/fi_engine/_native.abi3.so`), the same file `maturin develop` writes: the engine's venv and gongoozler's share it | Observed | `make check` |
+| `uv build --wheel engine` builds the engine's wheel (`cp311-abi3-linux_x86_64`), and `UV_FIND_LINKS` resolves `gongoozler[fi]` from it as from gongoozler's | Observed: `examples/fi_in_a_box.py` run against the two wheels alone | The box image |
 
 Measured (`kb/measurements.md`): locking a Nautilus file took 0.1–0.3 s. A cold `uv run`, with an
 empty cache, took 8.8 s, mostly downloading Nautilus's 74 MB wheel. Warm, uv added about 50 ms.

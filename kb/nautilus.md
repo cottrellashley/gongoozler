@@ -27,5 +27,15 @@ Pinned: the `nautilus_trader` 2.0.0rc8 wheel (PyPI, released 29 Oct 2026; wheels
 | `engine.cache.instrument(InstrumentId)` is `None` for an instrument not added | Observed | Checking a feed's declared instruments |
 | 2.0's `BacktestEngine` has no `trader` attribute; the `generate_*_report` functions are `BacktestNode`'s. gongoozler writes results from `to_dict()` instead, as canonical JSON | Observed | spec/results.md |
 
+## The engine's Rust crates (`engine/`, nautilus-model and nautilus-analysis 0.67)
+
+| Fact | Source | Used by |
+| --- | --- | --- |
+| `FuturesContract::builder()…build()` (a `bon` builder) validates its fields: `price_precision` must equal `price_increment`'s, the multiplier must be positive, strings ASCII; it returns an error, not a panic | Read: `instruments/futures_contract.rs`. Observed: a zero multiplier refused (`test_a_future_follows_its_nautilus_terms`) | `ws.future`, `fi_exec::ExchangeFuture` |
+| The `Instrument` trait gives `multiplier()` (a `Quantity`), `price_increment()` (a `Price`), `activation_ns()` and `expiration_ns()` (`Option<UnixNanos>`) | Read: `instruments/mod.rs` | The future's margin, tick and listing window |
+| `Price: FromStr` parses `"0.015625"` with the precision of its decimals (6) | Observed | `ws.future(price_increment=…)` |
+| `Currency::try_from_str(code)` is `None` for a code the registry lacks; a currency's `precision` is its minor unit's decimals (ISO 4217 for fiat) | Read: `types/currency.rs`. Observed: `XYZ` refused | `fi_exec::minor_unit`, `ws.future(currency=…)` |
+| `OrderBook` (L2) fills the engine's order-book fills; `nautilus-analysis`'s statistics (`SharpeRatio`, `SortinoRatio`, `MaxDrawdown`, `CAGR`, …) take returns keyed by `UnixNanos` | Observed: the engine's tests | `fi_exec::BookFill`, `fi-metrics` |
+
 **Not upstream:** Ashley's SSE backing for the message bus is uncommitted work on the clone's local
 branch `sse-msgbus-egress`, and its docs section is that branch's. Nothing here depends on it.

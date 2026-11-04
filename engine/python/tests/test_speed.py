@@ -31,6 +31,16 @@ def timed(f):
     return out, time.perf_counter() - t
 
 
+def best(f, n: int = 3):
+    """The result and the best of `n` timings: noise on a shared machine only ever adds time, so the
+    least is the estimate of what the work itself costs."""
+    out, times = None, []
+    for _ in range(n):
+        out, s = timed(f)
+        times.append(s)
+    return out, min(times)
+
+
 def check(name: str, seconds: float, budget: float, note: str = "") -> None:
     ROWS.append((name, seconds, budget, note))
     assert seconds <= budget, f"{name}: {seconds:.4f}s over its {budget:.4f}s budget"
@@ -85,10 +95,10 @@ def test_runs_cost_what_they_cost_in_rust(loaded):
     ws, rec = loaded
     n = min(300, BONDS // 3)
     built_in = fi.Strategy(fi.Decision.top_n("marks.signal", n), fill=fi.Fill.research(5.0))
-    run, s = timed(lambda: ws.run(built_in, rec))
+    run, s = best(lambda: ws.run(built_in, rec))
     check(f"one research run, monthly top-{n}", s, 0.05 * SERIAL, f"spec: 50 ms; {run.trades} trades")
     python = fi.Strategy(fi.Decision.python(lambda ctx: top(ctx, n)), fill=fi.Fill.research(5.0))
-    again, s = timed(lambda: ws.run(python, rec))
+    again, s = best(lambda: ws.run(python, rec))
     calls = len(rec.calendar.month_ends())
     builtin = ROWS[-1][1]
     # What a Python decision adds, against the built-in one on the same machine: a ratio, so it

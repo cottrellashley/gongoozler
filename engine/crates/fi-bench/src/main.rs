@@ -115,7 +115,8 @@ fn main() -> ExitCode {
     };
     let n = 300.min(bonds / 3).max(1);
     let one = strategy(n, 5.0, HoldingPolicy::Drift);
-    let (out, s) = time(|| run(&ws, &records, &one).expect("run"));
+    // The best of three: noise on a shared machine only ever adds time.
+    let (out, s) = (0..3).map(|_| time(|| run(&ws, &records, &one).expect("run"))).min_by(|a, b| a.1.total_cmp(&b.1)).expect("three runs");
     rows.push(Row {
         name: format!("one research run: monthly top-{n}, {} rebalances", u.calendar.month_ends().len()),
         seconds: s,

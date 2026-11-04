@@ -1030,6 +1030,7 @@ dependencies = [
  "polars-arrow",
  "pyo3",
  "pyo3-arrow",
+ "rayon",
  "ustr",
 ]
 

@@ -12,7 +12,7 @@
 //! cost against hand-written loops over the same data.
 //!
 //! **The budgets are the spec's machine's.** A fixed single-threaded loop is timed here and against
-//! its time on the machine the budgets were set on (`REFERENCE_NS`, a 16-thread desktop, 3 Nov
+//! its time on the machine the budgets were set on (`fi_research::machine`, a 16-thread desktop, 3 Nov
 //! 2026): a slower core scales every budget by that ratio, and a machine with fewer than 16 threads
 //! scales the parallel ones by the threads it lacks. Both factors are printed. A sweep must beat
 //! the same variants run one by one by half the thread count, up to 2×: a runner's threads are
@@ -40,27 +40,6 @@ fn time<T>(f: impl FnOnce() -> T) -> (T, f64) {
     (out, t.elapsed().as_secs_f64())
 }
 
-/// The calibration loop's best time on the machine the budgets were set on.
-const REFERENCE_NS: f64 = 42_600_000.0;
-
-/// The calibration loop: xorshift and floating point, single-threaded, about 43 ms there.
-fn calibration() -> f64 {
-    let mut best = f64::INFINITY;
-    for _ in 0..5 {
-        let t = Instant::now();
-        let (mut x, mut acc) = (0x9E37_79B9_7F4A_7C15u64, 0.0f64);
-        for _ in 0..(1 << 25) {
-            x ^= x << 13;
-            x ^= x >> 7;
-            x ^= x << 17;
-            acc += (x >> 11) as f64 * 1e-16;
-        }
-        std::hint::black_box(acc);
-        best = best.min(t.elapsed().as_nanos() as f64);
-    }
-    best
-}
-
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     let scale: f64 = args.iter().position(|a| a == "--scale").and_then(|i| args.get(i + 1)).and_then(|s| s.parse().ok()).unwrap_or(1.0);
@@ -68,9 +47,7 @@ fn main() -> ExitCode {
     let bonds = ((9_000.0 * scale).round() as usize).max(10);
     let days = 2_520;
     let threads = rayon::current_num_threads();
-    let core = (calibration() / REFERENCE_NS).max(1.0);
-    let cores = (16.0 / threads as f64).max(1.0);
-    let (serial_budget, parallel_budget) = (core, core * cores);
+    let (serial_budget, parallel_budget) = fi_research::machine::factors(threads);
     println!("fi-bench: {bonds} bonds × {days} days ({} cells), {threads} threads, scale {scale}", bonds * days);
     println!("budgets × {serial_budget:.2} for this machine's cores (calibrated), × {parallel_budget:.2} where parallel");
     let mut rows: Vec<Row> = Vec::new();

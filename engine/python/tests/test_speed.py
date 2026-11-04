@@ -20,6 +20,8 @@ import fi_engine as fi
 BONDS = int(os.environ.get("FI_SPEED_BONDS", "1000"))
 DAYS = 2520
 SCALE = BONDS / 9000
+# The budgets are the spec's machine's: this one's speed against it scales them (fi_research::machine).
+SERIAL, PARALLEL = fi._native.machine_factors()
 ROWS: list[tuple[str, float, float, str]] = []
 
 
@@ -37,7 +39,7 @@ def check(name: str, seconds: float, budget: float, note: str = "") -> None:
 @pytest.fixture(scope="module", autouse=True)
 def table():
     yield
-    print(f"\n\nfi_engine from Python: {BONDS} bonds × {DAYS} days\n")
+    print(f"\n\nfi_engine from Python: {BONDS} bonds × {DAYS} days; budgets × {SERIAL:.2f} single-threaded, × {PARALLEL:.2f} parallel\n")
     print("| test | seconds | budget | note |\n| --- | ---: | ---: | --- |")
     for name, s, b, note in ROWS:
         print(f"| {name} | {s:.4f} | {b:.4f} | {note} |")
@@ -64,10 +66,10 @@ def loaded(panel):
     values = {"clean": "price", "accrued": "price", "signal": "number"}
     _, s = timed(lambda: ws.series("marks", panel, entity="isin", kind="bond", time="date", values=values, grid=True))
     rows = panel.height
-    check("register a Polars frame (checked, interned, stored)", s, rows / 2e6, f"ours: 2 M rows/s; {rows / s / 1e6:.1f} M rows/s")
+    check("register a Polars frame (checked, interned, stored)", s, rows / 2e6 * SERIAL, f"ours: 2 M rows/s; {rows / s / 1e6:.1f} M rows/s")
     contracts = ws.supplied_bonds("marks")
     rec, s = timed(lambda: ws.records(contracts, ws.calendar("marks")))
-    check("unit records", s, 2.0 * SCALE, f"spec: 2 s at 9,000; {BONDS * DAYS / s / 1e6:.0f} M records/s")
+    check("unit records", s, 2.0 * SCALE * PARALLEL, f"spec: 2 s at 9,000; {BONDS * DAYS / s / 1e6:.0f} M records/s")
     return ws, rec
 
 
@@ -84,7 +86,7 @@ def test_runs_cost_what_they_cost_in_rust(loaded):
     n = min(300, BONDS // 3)
     built_in = fi.Strategy(fi.Decision.top_n("marks.signal", n), fill=fi.Fill.research(5.0))
     run, s = timed(lambda: ws.run(built_in, rec))
-    check(f"one research run, monthly top-{n}", s, 0.05, f"spec: 50 ms; {run.trades} trades")
+    check(f"one research run, monthly top-{n}", s, 0.05 * SERIAL, f"spec: 50 ms; {run.trades} trades")
     python = fi.Strategy(fi.Decision.python(lambda ctx: top(ctx, n)), fill=fi.Fill.research(5.0))
     again, s = timed(lambda: ws.run(python, rec))
     calls = len(rec.calendar.month_ends())
@@ -120,8 +122,8 @@ def test_python_models_cost_little_per_call(loaded):
         return (s - s.mean()) / s.std()
 
     _, s = timed(lambda: ws.evaluate([zp], cal))
-    check(f"a Python cross-section model ({len(cal)} calls)", s, len(cal) * 1e-4, f"ours: 100 µs a call; {s / len(cal) * 1e6:.0f} µs a call")
+    check(f"a Python cross-section model ({len(cal)} calls)", s, len(cal) * 1e-4 * SERIAL, f"ours: 100 µs a call; {s / len(cal) * 1e6:.0f} µs a call")
     _, b = timed(lambda: ws.evaluate([fi.Model.zscore("z", "marks.signal")], cal))
-    check("the built-in z-score", b, 2.0 * SCALE, f"{s / b:.1f}× faster than the Python one")
+    check("the built-in z-score", b, 2.0 * SCALE * PARALLEL, f"{s / b:.1f}× faster than the Python one")
     z, zpy = ws.frame("z")["z"].to_numpy(), ws.frame("zp")["z"].to_numpy()
     assert np.allclose(z, zpy, atol=1e-12, equal_nan=True)

@@ -6,6 +6,8 @@
 //! runs the variants in parallel. Research and Implement differ only in the execution model and
 //! the decision times (invariant I4): this driver uses the kernel's ledger as is.
 
+pub mod machine;
+
 use std::sync::Arc;
 
 use rayon::prelude::*;

@@ -1987,6 +1987,13 @@ impl PyWorkspace {
     }
 }
 
+/// This machine against the one the speed budgets were set on: the factors (single-threaded,
+/// parallel) a budget scales by here, never below one (`fi_research::machine`).
+#[pyfunction]
+fn machine_factors(py: Python<'_>) -> (f64, f64) {
+    py.detach(|| fi_research::machine::factors(rayon::current_num_threads()))
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyWorkspace>()?;
@@ -2018,6 +2025,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Under a supervisor, the engine reports its progress into a ring of its own, closed at exit.
     progress::install();
     m.add_function(wrap_pyfunction!(progress::_close_progress, m)?)?;
+    m.add_function(wrap_pyfunction!(machine_factors, m)?)?;
     py.import("atexit")?.call_method1("register", (m.getattr("_close_progress")?,))?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
